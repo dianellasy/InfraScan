@@ -12,7 +12,7 @@ Current Phase:
 - [ ] Component Diagrams (Frontend, Backend, Inference)
 - [ ] Data Flow Diagram (DFD)
 - [ ] API Design and Interface Definitions
-- [ ] Technology Stack and Justifications
+- [-] Technology Stack and Justifications (DONE - 10/12)
 - [ ] Database Schema / ERD
 - [ ] ML Data Pipeline Architecture
 - [ ] Deployment Architecture (proposed edge, cloud, or hybrid)
