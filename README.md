@@ -13,6 +13,6 @@ Current Phase:
 - [ ] Data Flow Diagram (DFD)
 - [-] API Design and Interface Definitions (DONE - 10/12)
 - [-] Technology Stack and Justifications (DONE - 10/12)
-- [ ] Database Schema / ERD
+- [-] Database Schema / ERD (DONE - 12/14)
 - [ ] ML Data Pipeline Architecture
 - [ ] Deployment Architecture (proposed edge, cloud, or hybrid)
