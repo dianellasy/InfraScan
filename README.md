@@ -55,3 +55,6 @@ Unavailable` rather than successful placeholder data.
 Install backend dependencies with `python -m pip install -r backend/requirements.txt`.
 Run the API from the backend directory with `uvicorn main:app --reload`; the
 interactive API schema is available at `/docs`.
+
+For local frontend development, the API allows cross-origin requests from
+`http://localhost:5173`.
