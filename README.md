@@ -5,6 +5,17 @@ Road Infrastructure Issue Detection System
 Current Phase:
 	- Architectural Design and Planning
 
+## Branching
+
+`main` is the source of truth. `frontend-dev` and `backend-dev` are the long-lived development branches.
+
+To start a change, check out the branch for your area and create your working branch from it:
+
+```bash
+git checkout frontend-dev   # or backend-dev
+git checkout -b <your-branch-name>
+```
+
 ## Architecture Checklist
 
 - [-] System Context Diagram (C4 Level 1) (DONE - 10/13)
