@@ -1,9 +1,11 @@
 
 
+import { apiBaseUrl } from "./api/endpoints.ts";
+
 function App() {
   
   const callTestEndpoint = async () => {
-    const respose = await fetch("http://127.0.0.1:8000/test")
+    const respose = await fetch(`${apiBaseUrl}/test`)
     const data = await respose
     if (data.ok) {
       console.log("endpoint good" + data)
