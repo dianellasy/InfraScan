@@ -75,6 +75,7 @@ interactive API schema is available at `/docs`.
 
 ## Model (YOLO11)
 size | param | mAP50-95 | CPU Inf.
+---------------------------------
 n    | 2.6M  | 39.5%    | 56ms
 
 s    | 9.4M  | 47%      | 90ms
