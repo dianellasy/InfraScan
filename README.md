@@ -69,3 +69,23 @@ interactive API schema is available at `/docs`.
 
 For local frontend development, the API allows cross-origin requests from
 `http://localhost:5173`.
+
+## Local Docker development
+
+Copy `.env.example` to `.env`, then start the API and PostgreSQL:
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+The API is available at `http://localhost:8000` and its interactive schema at
+`http://localhost:8000/docs`. PostgreSQL is available on port `5432`; the API
+container receives its connection string in `DATABASE_URL` and waits for the
+database health check before starting. The current API does not yet configure a
+database adapter, so this provides the container and connection settings but
+does not enable persistence. The example database credentials are for local
+development only; change them in `.env` before using this setup elsewhere.
+
+Stop the containers with `docker compose down`. To also remove the local
+database volume, run `docker compose down --volumes`.
