@@ -67,5 +67,21 @@ Install backend dependencies with `python -m pip install -r backend/requirements
 Run the API from the backend directory with `uvicorn main:app --reload`; the
 interactive API schema is available at `/docs`.
 
+## Possible Model Evaluation Metric for Model
+- mAP50-95
+- Mean IoU
+- Recall per Damange class
+- Geolocation Mean Error
+
+## Model (YOLO11)
+size | param | mAP50-95 | CPU Inf.
+n    | 2.6M  | 39.5%    | 56ms
+
+s    | 9.4M  | 47%      | 90ms
+
+m    | 20.1M | 51.5%    | 183ms
+
+L    | 25.3M | 53.4%    | 239ms
+
 For local frontend development, the API allows cross-origin requests from
 `http://localhost:5173`.
