@@ -46,6 +46,7 @@ services:
         condition: service_healthy
 
   worker:
+    restart: on-failure
     build:
       context: ./backend
       dockerfile: inference/Dockerfile
@@ -53,6 +54,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-infrascan}:${POSTGRES_PASSWORD:-infrascan_dev}@db:5432/${POSTGRES_DB:-infrascan}
       CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-infrascan}:${RABBITMQ_PASSWORD:-infrascan_dev}@rabbitmq:5672//
       CELERY_RESULT_BACKEND: db+postgresql+psycopg://${POSTGRES_USER:-infrascan}:${POSTGRES_PASSWORD:-infrascan_dev}@db:5432/${POSTGRES_DB:-infrascan}
+    volumes:
+      - ./backend/inference/data:/app/inference/data
     command: celery -A inference.celery worker --loglevel=info
     depends_on:
       db:
