@@ -1,0 +1,3 @@
+IMPORTANT: The following weights (as of nov.4, 2026) is a sample
+model that is pretty bad. This is only used as a stub to smoke test
+pipeline before MVP
