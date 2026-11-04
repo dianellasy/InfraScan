@@ -15,16 +15,49 @@ services:
       timeout: 5s
       retries: 5
 
+  rabbitmq:
+    image: rabbitmq:3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-infrascan}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-infrascan_dev}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   api:
     build:
       context: ./backend
       dockerfile: Dockerfile
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-infrascan}:${POSTGRES_PASSWORD:-infrascan_dev}@db:5432/${POSTGRES_DB:-infrascan}
+      CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-infrascan}:${RABBITMQ_PASSWORD:-infrascan_dev}@rabbitmq:5672//
+      CELERY_RESULT_BACKEND: db+postgresql://${POSTGRES_USER:-infrascan}:${POSTGRES_PASSWORD:-infrascan_dev}@db:5432/${POSTGRES_DB:-infrascan}
     ports:
       - "8000:8000"
     depends_on:
       db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: inference/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-infrascan}:${POSTGRES_PASSWORD:-infrascan_dev}@db:5432/${POSTGRES_DB:-infrascan}
+      CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-infrascan}:${RABBITMQ_PASSWORD:-infrascan_dev}@rabbitmq:5672//
+      CELERY_RESULT_BACKEND: db+postgresql://${POSTGRES_USER:-infrascan}:${POSTGRES_PASSWORD:-infrascan_dev}@db:5432/${POSTGRES_DB:-infrascan}
+    command: celery -A inference.celery worker --loglevel=info
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
 volumes:
