@@ -37,6 +37,7 @@ and Pydantic DTOs described in the architecture design:
 
 | Method | Endpoint |
 | --- | --- |
+| `POST` | `/api/v1/inference/smoke_test` |
 | `POST` | `/api/v1/inference/jobs` |
 | `GET`, `POST` | `/api/v1/issues` |
 | `GET` | `/api/v1/issues/review-queue` |
