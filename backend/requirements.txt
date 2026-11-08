@@ -2,3 +2,7 @@ fastapi>=0.115,<1
 pydantic>=2,<3
 python-multipart>=0.0.20,<1
 uvicorn[standard]>=0.34,<1
+celery>=5.4,<6
+pillow>=10
+sqlalchemy>=2,<3
+psycopg[binary]>=3,<4
