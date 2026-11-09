@@ -107,3 +107,20 @@ development only; change them in `.env` before using this setup elsewhere.
 
 Stop the containers with `docker compose down`. To also remove the local
 database volume, run `docker compose down --volumes`.
+
+## Initial Supported Devices/Media File Format for Happy-Path Development
+- JPEG -> Image file should contain GPS coordinates and specific camera specs (will specify soon)
+- GoPro - GPMF (1 second will have some number of frames with geo-tagged lat/long & gps trajectory)
+
+- after this, we either need to expand to support more devices with different formats and/or allow users to geo-tag issues after detections
+
+## Current state of Geolocation method
+- method: inverse projection mapping
+- constraints: each frame will have have corresponding location
+- high level:
+	- detection_location = camera_or_source_gps + offset_detection_from_camera/source(thru inverse projection mapping)
+
+- current state:
+	- prototype have worked
+    - need to wire up with the rest project
+    - need extensive testing though 
