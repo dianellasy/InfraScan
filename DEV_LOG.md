@@ -22,14 +22,14 @@ Huy | Nov 10| [frontend-backend_contracts](#5-frontend-backend-contracts)
 verified all container are started and running. Also, added the outputs folder to the docker volume. For testing purposes before the s3 bucket, input image and annotated results are in the outputs folder. Make sure no other services are running on the ports specified by the compose file. Maybe we can add the frontend into the docker compose file as well but we can just host the frontend on an s3 bucket as well. idk yet.
 
 ## 4. Integrating Geolocation method
-current method: Inverse Projection Mapping
-assumptions: 
-            1) Camera intrinsics and calibration is for my camera, galaxy flip 7 main lens
-            2) each image will have a source gps
-            3) detection model works and ready to go (using my nano model for now, slot in the small one when avail.)
-decision:
-            1) for now right, I will work on the pipeline intaking a single image. Once thats finished, video inference will be done by extracting some number of frames per second from a video and process them as group of images (maybe need a separate function that will reuse this single image processing function)
-            2) according to the schema, we need to do pre-processing, inference, post-processing, and persistence
+- current method: Inverse Projection Mapping
+- assumptions: 
+            - Camera intrinsics and calibration is for my camera, galaxy flip 7 main lens
+            - each image will have a source gps
+            - detection model works and ready to go (using my nano model for now, slot in the small one when avail.)
+- decision:
+            - for now right, I will work on the pipeline intaking a single image. Once thats finished, video inference will be done by extracting some number of frames per second from a video and process them as group of images (maybe need a separate function that will reuse this single image processing function)
+            - according to the schema, we need to do pre-processing, inference, post-processing, and persistence
                 as of the minimum viable product, we will assume the happy path, meaning that all input images are clear, nothing in the pipeline breaks, device is fully supported. 
 
 Current stats from geolocation method:
