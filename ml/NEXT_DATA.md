@@ -78,7 +78,14 @@ Shops encroaching on the road: nothing found.
 | --- | --- | --- | --- | --- |
 | Pothole Detection (andrewmvd) | https://www.kaggle.com/datasets/andrewmvd/pothole-detection | 351 MB | 665 images, VOC boxes, pothole | "other" |
 | Potholes-Detection-YOLOv8 | https://www.kaggle.com/datasets/anggadwisunarto/potholes-detection-yolov8 | 753 MB | 1,581 images, YOLO pothole | CC0 |
+| Pothole Image Segmentation (farzadnekouei) | https://www.kaggle.com/datasets/farzadnekouei/pothole-image-segmentation-dataset | about 50 MB | 780 images (720 train = about 240 photos x 3 augmented copies, 60 val), YOLOv8 pothole polygons, stretched to 640x640, plus a sample video | Apache 2.0 |
 | RDD2022 India Pothole D40 | https://www.kaggle.com/datasets/vidishbijalwan/rdd2022-india-pothole-d40 | 84 MB | RDD2022 India subset (same data we already use) | not checked |
 
 Any extra pothole data is judged only on the same RDD2022 val split, so we can
 see if it really helps.
+
+Note on the farzadnekouei set: it is small and the train images are
+augmented copies (file names like `pic-10-_jpg.rf.<hash>.jpg`), so group by
+the `pic-N` part to avoid leakage. Its masks give pothole area, which could
+later replace the box-area severity heuristic. The sample video is handy for
+testing the video stretch goal.
