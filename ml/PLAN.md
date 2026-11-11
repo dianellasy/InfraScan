@@ -29,22 +29,36 @@ Only the pothole class overlaps with the six PRD issue types. The MVP only needs
 potholes, so v1 can serve the MVP. v1 will NOT meet the PRD goal of "classify at
 least five road issue categories". Open manholes, water clogging, broken
 footpaths, speed breakers and encroachments have no training data in RDD2022.
-See `NEXT_DATA.md` (to be written) for candidate datasets.
+See `NEXT_DATA.md` for candidate datasets.
 
 ## Dataset
 
 RDD2022 (Road Damage Detection 2022). Expected subsets: Japan, India, Czech,
 Norway, United States, China MotorBike, China Drone. Labels are Pascal VOC XML.
 
-To be filled in from the real data on Kaggle (not from memory):
+Facts from the real data on Kaggle (b0 run, `ml/reports/b0_yolo11s_640/stats.json`):
 
-- Kaggle dataset used and its licence: TODO
-- Countries present and image sizes per country: TODO
-- Label counts per class, images with potholes: TODO
-- Other label codes found in the XML files: TODO
-- Day vs night images: TODO (RDD2022 is thought to be mostly daytime)
-- Official test labels: expected to be hidden, so we cannot score on the
-  official test set. We use our own split of the labeled training data.
+- Kaggle dataset: `gurunathan88/rdd2022` (mirror says MIT). The official
+  RDD2022 licence is CC BY-SA 4.0, so we follow that.
+- 38,385 labeled images. Official test folders have images but 0 labels.
+- Countries and image sizes:
+
+| country | images | size | images with pothole |
+| --- | --- | --- | --- |
+| China_Drone | 2,401 | 512x512 | 64 |
+| China_MotorBike | 1,977 | 512x512 | 164 |
+| Czech | 2,829 | 600x600 | 154 |
+| India | 7,706 | 720x720 | 1,530 |
+| Japan | 10,506 | mostly 600x600 | 1,390 |
+| Norway | 8,161 | about 4000x2000 | 256 |
+| United_States | 4,805 | 640x640 | 116 |
+
+- Boxes: D00 26,016, D10 11,830, D20 10,616, D40 (pothole) 6,544. 3,674
+  images contain a pothole.
+- Other label codes dropped: D44 5,057, D50 3,581, Repair 1,046, D43 793,
+  D01 179, D11 45, Block crack 3, D0w0 1.
+- Day vs night: only 111 images have mean brightness below 60. Brightness
+  1st percentile is 67, median 128. Night data is essentially missing.
 
 ## Split plan
 
@@ -52,8 +66,10 @@ To be filled in from the real data on Kaggle (not from memory):
   training images only.
 - Stratify by country and by "has pothole" so every split has potholes.
 - Group near-duplicate frames so that frames from the same road or video never
-  land in two splits. Grouping key: filename prefix or sequence id, decided after
-  looking at the real filenames. The rule used will be written here.
+  land in two splits. Rule used in v0: blocks of 30 consecutive image ids per
+  country form one group. This was not enough: a dHash check still found 2,118
+  near-duplicate pairs across splits. Next version: also merge dHash
+  near-duplicates into the same group.
 - The test split is touched only once per milestone. All tuning uses val.
 - Scripts live in `ml/data/` so the split can be rebuilt exactly (fixed seed).
 
