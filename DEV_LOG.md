@@ -31,3 +31,18 @@ decision:
             2) according to the schema, we need to do pre-processing, inference, post-processing, and persistence
                 as of the minimum viable product, we will assume the happy path, meaning that all input images are clear, nothing in the pipeline breaks, device is fully supported. 
 
+Current stats from geolocation method:
+
+    Huy's Phone and Config
+    - across 9 trials from a distance of 2-5.4 meters, mean diff is about -0.04 meters
+    Dianella's Phone and Config
+    - across 5 trials from a distance of 3-4.5 meters, mean diff is about -0.16 meters
+    Esther's Phone and Config
+    - across 5 trials from a distance of 3-4.5 meters, mean diff is about -0.08 meters
+    Eileen's Phone and Config
+    - across 5 trials from a distance of 3.4.5 meters, mean diff is about 0.41 meters
+
+    Weighted mean of difference from 24 trials: .05 meters or about 1.9 inches
+
+IMPORTANT NOTICE: The trials with Dianella, Esther, and Eileen were not done with complete control.
+
