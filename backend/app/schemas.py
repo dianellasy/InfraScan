@@ -1,10 +1,23 @@
-from datetime import datetime
-from typing import Generic, TypeVar
+import math
+from datetime import UTC, datetime
+from typing import Annotated, Generic, Literal, TypeVar
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl
+from pydantic import (
+    AwareDatetime,
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    HttpUrl,
+    field_validator,
+)
 
 T = TypeVar("T")
+
+
+def _normalize_utc(value: datetime) -> datetime:
+    return value.astimezone(UTC)
 
 
 class Page(BaseModel, Generic[T]):
@@ -22,13 +35,49 @@ class InferenceMetadata(BaseModel):
     longitude: float | None = Field(default=None, ge=-180, le=180)
 
 
+class InferenceSubmissionMetadata(BaseModel):
+    """Validated client metadata for a single-image inference submission."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    captured_at: datetime
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+    @field_validator("captured_at", mode="before")
+    @classmethod
+    def validate_captured_at(cls, value: object) -> datetime:
+        if not isinstance(value, str):
+            raise ValueError("captured_at must be an ISO 8601 datetime string")
+
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError("captured_at must be a valid ISO 8601 datetime") from exc
+
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise ValueError("captured_at must include a timezone")
+        return parsed.astimezone(UTC)
+
+    @field_validator("latitude", "longitude", mode="before")
+    @classmethod
+    def validate_coordinate(cls, value: object) -> float:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("coordinate must be a JSON number")
+        if not math.isfinite(value):
+            raise ValueError("coordinate must be finite")
+        return float(value)
+
+
 class InferenceJobAccepted(BaseModel):
     job_id: UUID
-    status: str
-    submitted_at: datetime
+    status: Literal["pending"]
+    submitted_at: Annotated[AwareDatetime, AfterValidator(_normalize_utc)]
 
 
 class InferenceJobDTO(InferenceJobAccepted):
+    status: str
+    submitted_at: datetime
     progress: int | None = Field(default=None, ge=0, le=100)
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -118,3 +167,13 @@ class DamageDistributionDTO(BaseModel):
     severity: str
     detection_count: int = Field(ge=0)
     percentage: float = Field(ge=0, le=100)
+
+
+class APIError(BaseModel):
+    code: str
+    message: str
+    field: str | None = None
+
+
+class APIErrorResponse(BaseModel):
+    error: APIError

@@ -1,4 +1,5 @@
 .env
+.venv/
 
 # ML work (Atul)
 ml/.venv-win/
