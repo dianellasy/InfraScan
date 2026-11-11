@@ -4,7 +4,8 @@
 Huy | Nov 4 | [component_setup](#1-docker-and-component-set-up)
 Huy | Nov 4 | [sample_endpoint](#2-smoke-testing-endpoint)
 Huy | Nov 4 | [verified_testing](#3-verified-docker-container-running-and-smoke-test-endpoint-operational)
-Huy | Nov 10| 
+Huy | Nov 10| [geolocation_method_update](#4-integrating-geolocation-method)
+Huy | Nov 10| [frontend-backend_contracts](#5-frontend-backend-contracts)
 
 
 ## 1. docker and component set up 
@@ -46,3 +47,24 @@ Current stats from geolocation method:
 
 IMPORTANT NOTICE: The trials with Dianella, Esther, and Eileen were not done with complete control.
 
+## 5. Frontend-backend contracts
+
+- Files: One file per job (could be img or vid). Image only for now, JPG  at 4032 x 3024 (max, anything under could also do)
+- Data/Metadata (act as our frontend-backend contract): 
+    - image file ()
+    - captured_at
+    - GPS (lat/long)
+    - Auth token (associate w/ user)
+Validation: Coordinate pairing, timestamp timezones, and handling of unknown fields.
+    - must be exactly one non-empty upload that decode to jpeg
+    - at most 5 MB in size
+    - json metadata should contain (lat/long), captured_at. anything without will be auto rejected
+    - captured_at should be iso 8601 (resolve time ambuigity and format is largest unit to smallest is clean)
+    - verify lat is (-90,90) and long is (-180,180). ensure format is decimal degrees for ease of calculation with postgis
+    - ensure auth token is sent from frontend. auto-reject if not. Also auto-reject is expired.
+Success response: HTTP 202 Accepted, with job_id, initial status, and submitted_at. Return to client the jobs_id. Make sure to queue jobs, store media, job is recorded in postgres
+Errors: 
+    - returned error message field contain http error code w/ corresponding name, error message, and what field is the error associated with (gps problems, file size problems, etc...)
+Tracking: frontend receive a jobs_id upon **successful** submission of job and will use jobs_id to track
+
+IMPORTANT NOTE: on Nov 10, I will defer auth for now and just focus on getting the core functionality of the geolocation part done. We will do auth after we establish that the MVP is good to go

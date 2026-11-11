@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Protocol, Sequence
+from typing import Protocol
 from uuid import UUID
 
 from fastapi import UploadFile
@@ -13,6 +13,7 @@ from app.schemas import (
     InferenceJobAccepted,
     InferenceJobDTO,
     InferenceMetadata,
+    InferenceSubmissionMetadata,
     IssueCreate,
     IssueDTO,
     IssueUpdate,
@@ -22,10 +23,22 @@ from app.schemas import (
 )
 
 
+class SubmissionDependencyUnavailableError(Exception):
+    """A required storage, persistence, or queue dependency is unavailable."""
+
+
 class InfraScanService(Protocol):
     async def submit_inference(
-        self, files: Sequence[UploadFile], metadata: InferenceMetadata
-    ) -> InferenceJobAccepted: ...
+        self, file: UploadFile, metadata: InferenceSubmissionMetadata
+    ) -> InferenceJobAccepted:
+        """Accept one image without waiting for inference.
+
+        Implementations must store the media, create and commit the application
+        job with its metadata and media reference, then enqueue work using that
+        job ID. The job must be committed before a worker can consume it.
+        Dispatch failures must be handled explicitly by the implementation.
+        """
+        ...
 
     async def list_issues(
         self, page: int, page_size: int, status: str | None

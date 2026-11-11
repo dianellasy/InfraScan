@@ -68,6 +68,69 @@ Install backend dependencies with `python -m pip install -r backend/requirements
 Run the API from the backend directory with `uvicorn main:app --reload`; the
 interactive API schema is available at `/docs`.
 
+### Image inference submission contract
+
+`POST /api/v1/inference/jobs` accepts `multipart/form-data` and returns as soon
+as the application service has accepted the job; it does not wait for model
+inference. The request must contain exactly two parts:
+
+- `file`: exactly one nonempty JPEG. The controller validates the actual image,
+  not its extension or declared MIME type. The maximum size is 5,000,000 bytes
+  (inclusive), the longest side is at most 4032 pixels, and the shortest side is
+  at most 3024 pixels. EXIF orientation is accounted for.
+- `metadata`: one JSON-encoded object containing exactly `captured_at`,
+  `latitude`, and `longitude`. The timestamp must be an ISO 8601 string with a
+  timezone and is normalized to UTC. Latitude is from -90 through 90 and
+  longitude is from -180 through 180, in decimal degrees.
+
+For example:
+
+```bash
+curl --request POST http://localhost:8000/api/v1/inference/jobs \
+  --form 'file=@road.jpg;type=image/jpeg' \
+  --form 'metadata={"captured_at":"2026-11-10T14:30:00-08:00","latitude":33.8823,"longitude":-117.8851}'
+```
+
+A successful submission returns `202 Accepted`:
+
+```json
+{
+  "job_id": "7b101a70-ec2b-4c8a-a728-272fff4fd7b8",
+  "status": "pending",
+  "submitted_at": "2026-11-10T22:30:01Z"
+}
+```
+
+The frontend can track that application job with
+`GET /api/v1/jobs/{job_id}`. A Celery task ID is not a job ID.
+
+Errors use `{"error":{"code":"...","message":"...","field":"..."}}`. Stable
+codes include `INVALID_MULTIPART`, `UNEXPECTED_MULTIPART_FIELD`,
+`MULTIPLE_FILES`, `DUPLICATE_METADATA`, `MISSING_FILE`, `EMPTY_FILE`,
+`FILE_TOO_LARGE`, `MISSING_METADATA`, `INVALID_METADATA_JSON`,
+`INVALID_METADATA`, `MISSING_METADATA_FIELD`, `UNKNOWN_METADATA_FIELD`,
+`INVALID_CAPTURED_AT`, `INVALID_COORDINATE`, `UNSUPPORTED_REQUEST_MEDIA_TYPE`,
+`UNSUPPORTED_IMAGE_FORMAT`, `INVALID_IMAGE_DIMENSIONS`, `INVALID_IMAGE`,
+`SERVICE_UNAVAILABLE`, `SUBMISSION_DEPENDENCY_UNAVAILABLE`, and
+`INTERNAL_ERROR`.
+
+Authentication is intentionally not enforced in this milestone. The future
+production request will carry `Authorization: Bearer <token>` and the backend
+will derive the authenticated user ID; client-supplied user IDs are rejected as
+unknown metadata.
+
+The eventual application service must store the media, create and commit the
+database job with its metadata and stored-media reference, enqueue work by the
+application job ID, and return the acceptance DTO. The database job must be
+committed before a worker can consume it, and dispatch failures need explicit
+handling. Those storage, database, queue, tracking, and authentication
+implementations are not part of the controller milestone.
+
+The controller bounds reads of the uploaded file, but this is not a
+server-wide request-body limit. Production deployment must separately
+configure limits at the reverse proxy/ASGI server and account for multipart
+parser limits.
+
 ## Possible Model Evaluation Metric for Model
 - mAP50-95
 - Mean IoU
