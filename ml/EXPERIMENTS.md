@@ -22,7 +22,7 @@ next step. Numbers here only come from real logs saved under `ml/reports/`.
 
 - Config: yolo11s.pt (COCO), imgsz 640, 50 epochs, patience 15, batch 32,
   seed 42, default augmentation, AMP, 1x Tesla T4. Ultralytics 8.4.210.
-- Kaggle: `atulchahar/infrascan-b0-yolo11s-640` version 1. Total 425 min of
+- Kaggle: https://www.kaggle.com/code/atulchahar/infrascan-b0-yolo11s-640 (version 1). Total 425 min of
   GPU session (about 50 min data prep, about 7.3 min per epoch).
 - Raw files: `ml/reports/b0_yolo11s_640/` (results.csv, eval_val.json,
   eval_test.json, stats.json, env.json, curves).

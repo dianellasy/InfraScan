@@ -26,7 +26,7 @@ See `ml/NEXT_DATA.md` for datasets that could add them.
 - Training: 50 epochs, batch 32, seed 42, default augmentation, AMP, on one
   Tesla T4 on Kaggle (torch 2.11.0+cu130). The whole Kaggle run took 425 min,
   including about 50 min of data prep.
-- Kaggle notebook: `atulchahar/infrascan-b0-yolo11s-640` (private).
+- Kaggle notebook (training code, full log and outputs): https://www.kaggle.com/code/atulchahar/infrascan-b0-yolo11s-640
 - Best epoch is picked by Ultralytics fitness on val. Val mAP50 was still
   rising slowly at epoch 50 (0.579), so more epochs may help a little.
 
