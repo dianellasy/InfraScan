@@ -1,0 +1,253 @@
+{
+ "n_labeled_images": 38385,
+ "xml_without_image": 0,
+ "test_folders": {
+  "China_MotorBike/China_MotorBike/test": {
+   "images": 500,
+   "xml": 0
+  },
+  "Czech/Czech/test": {
+   "images": 709,
+   "xml": 0
+  },
+  "India/India/test": {
+   "images": 1959,
+   "xml": 0
+  },
+  "Japan/Japan/test": {
+   "images": 2627,
+   "xml": 0
+  },
+  "Norway/Norway/test": {
+   "images": 2040,
+   "xml": 0
+  },
+  "United_States/United_States/test": {
+   "images": 1200,
+   "xml": 0
+  }
+ },
+ "seed": 42,
+ "block": 30,
+ "max_side": 1280,
+ "dark_mean_threshold": 60,
+ "per_country": {
+  "China_Drone": {
+   "images": 2401,
+   "sizes": {
+    "512x512": 2401
+   },
+   "boxes": {
+    "D10": 1263,
+    "D00": 1426,
+    "D20": 293,
+    "D40": 86
+   },
+   "images_with_pothole": 64,
+   "empty_images": 482,
+   "dark_images": 14,
+   "splits": {
+    "test": 270,
+    "train": 1891,
+    "val": 240
+   }
+  },
+  "China_MotorBike": {
+   "images": 1977,
+   "sizes": {
+    "512x512": 1977
+   },
+   "boxes": {
+    "D20": 641,
+    "D00": 2678,
+    "D40": 235,
+    "D10": 1096
+   },
+   "images_with_pothole": 164,
+   "empty_images": 43,
+   "dark_images": 0,
+   "splits": {
+    "test": 240,
+    "train": 1560,
+    "val": 177
+   }
+  },
+  "Czech": {
+   "images": 2829,
+   "sizes": {
+    "600x600": 2829
+   },
+   "boxes": {
+    "D00": 988,
+    "D40": 197,
+    "D10": 399,
+    "D20": 161
+   },
+   "images_with_pothole": 154,
+   "empty_images": 1757,
+   "dark_images": 0,
+   "splits": {
+    "train": 2247,
+    "test": 307,
+    "val": 275
+   }
+  },
+  "India": {
+   "images": 7706,
+   "sizes": {
+    "720x720": 7706
+   },
+   "boxes": {
+    "D40": 3187,
+    "D00": 1555,
+    "D20": 2021,
+    "D10": 68
+   },
+   "images_with_pothole": 1530,
+   "empty_images": 4483,
+   "dark_images": 9,
+   "splits": {
+    "train": 6146,
+    "test": 799,
+    "val": 761
+   }
+  },
+  "Japan": {
+   "images": 10506,
+   "sizes": {
+    "600x600": 10187,
+    "1024x1024": 147,
+    "540x540": 124,
+    "1080x1080": 48
+   },
+   "boxes": {
+    "D20": 6198,
+    "D40": 2243,
+    "D10": 3979,
+    "D00": 4049
+   },
+   "images_with_pothole": 1390,
+   "empty_images": 2606,
+   "dark_images": 84,
+   "splits": {
+    "train": 8395,
+    "test": 1077,
+    "val": 1034
+   }
+  },
+  "Norway": {
+   "images": 8161,
+   "sizes": {
+    "4040x2035": 4342,
+    "3643x2041": 2896,
+    "3650x2044": 923
+   },
+   "boxes": {
+    "D00": 8570,
+    "D20": 468,
+    "D40": 461,
+    "D10": 1730
+   },
+   "images_with_pothole": 256,
+   "empty_images": 5247,
+   "dark_images": 4,
+   "splits": {
+    "train": 6480,
+    "val": 811,
+    "test": 870
+   }
+  },
+  "United_States": {
+   "images": 4805,
+   "sizes": {
+    "640x640": 4805
+   },
+   "boxes": {
+    "D10": 3295,
+    "D00": 6750,
+    "D20": 834,
+    "D40": 135
+   },
+   "images_with_pothole": 116,
+   "empty_images": 0,
+   "dark_images": 0,
+   "splits": {
+    "test": 485,
+    "train": 3810,
+    "val": 510
+   }
+  }
+ },
+ "per_split": {
+  "test": {
+   "images": 4048,
+   "boxes": {
+    "D10": 1146,
+    "D00": 2764,
+    "D20": 1063,
+    "D40": 633
+   },
+   "images_with_pothole": 359,
+   "empty_images": 1573
+  },
+  "train": {
+   "images": 30529,
+   "boxes": {
+    "D10": 9485,
+    "D00": 20505,
+    "D20": 8518,
+    "D40": 5248
+   },
+   "images_with_pothole": 2953,
+   "empty_images": 11610
+  },
+  "val": {
+   "images": 3808,
+   "boxes": {
+    "D00": 2747,
+    "D10": 1199,
+    "D20": 1035,
+    "D40": 663
+   },
+   "images_with_pothole": 362,
+   "empty_images": 1435
+  }
+ },
+ "total_boxes": {
+  "D10": 11830,
+  "D00": 26016,
+  "D20": 10616,
+  "D40": 6544
+ },
+ "images_with_pothole": 3674,
+ "other_labels_dropped": {
+  "D44": 5057,
+  "D50": 3581,
+  "Repair": 1046,
+  "D43": 793,
+  "D01": 179,
+  "D11": 45,
+  "Block crack": 3,
+  "D0w0": 1
+ },
+ "box_flags": {
+  "zero_size_dropped": 1,
+  "tiny_kept": 338
+ },
+ "brightness_percentiles": {
+  "1": 67.3,
+  "5": 82.4,
+  "10": 94.3,
+  "50": 127.7,
+  "90": 164.1
+ },
+ "near_duplicate_pairs_across_splits": {
+  "total": 2118,
+  "by_split_pair": {
+   "test-train": 1056,
+   "train-val": 944,
+   "test-val": 118
+  },
+  "max_hamming": 4
+ }
+}
