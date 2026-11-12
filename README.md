@@ -131,6 +131,100 @@ server-wide request-body limit. Production deployment must separately
 configure limits at the reverse proxy/ASGI server and account for multipart
 parser limits.
 
+### Database persistence models and migrations
+
+SQLAlchemy 2.x ORM models live under `backend/app/models/` and share the
+declarative `Base` in `backend/app/models/base.py`:
+
+- `InputMedia` (`input_media`): stores `media_id` (UUID primary key), `data`
+  (required PostgreSQL `BYTEA` payload for JPEG bytes), `content_type`
+  (required string), and `filename` (nullable string).
+- `InferenceJob` (`inference_jobs`): stores `job_id` (UUID primary key),
+  `user_id` (nullable UUID without a foreign key until authentication and a
+  `users` table exist), `input_media_id` (required foreign key to
+  `input_media.media_id` with `ON DELETE RESTRICT`, indexed and non-unique so
+  multiple jobs may reference the same media), `status` (`pending`, `running`,
+  `completed`, or `failed`, defaulting to `pending`), `model_version` (nullable
+  string with no default until assigned by the service/worker), `created_at`
+  (required `TIMESTAMPTZ` defaulting to database `now()`), `started_at` and
+  `completed_at` (nullable `TIMESTAMPTZ`), `captured_at` (required
+  `TIMESTAMPTZ`), `latitude` (required `NUMERIC` in `[-90, 90]`), and
+  `longitude` (required `NUMERIC` in `[-180, 180]`).
+
+**API timestamp mapping (`created_at` <-> `submitted_at`):** The public HTTP
+contract (`InferenceJobAccepted`, `InferenceJobDTO`, and the `submitted_after` /
+`submitted_before` query filters) uses `submitted_at`, whereas the ORM model and
+`inference_jobs` table persist `created_at`. Future service and repository
+implementations must map `InferenceJob.created_at` to `submitted_at` (and query
+`created_at` for submission-time filters) so the external API contract remains
+unchanged.
+
+Schema lifecycle is managed exclusively with Alembic (`backend/alembic.ini` and
+`backend/alembic/`), never with startup `Base.metadata.create_all()`.
+Application tables are kept separate from Celery's result-backend tables
+(`celery_taskmeta` and `celery_tasksetmeta`), which `backend/alembic/env.py`
+excludes from autogenerate comparisons.
+
+#### Supplying `DATABASE_URL`
+
+Database credentials are never hardcoded in `alembic.ini` or source files.
+Supply a PostgreSQL connection string in the `DATABASE_URL` environment
+variable (`postgresql://`, `postgres://`, or `postgresql+psycopg://`); Alembic
+automatically normalizes `postgresql://` and `postgres://` URLs to use the
+installed `psycopg` (v3) driver:
+
+```bash
+export DATABASE_URL="postgresql://<user>:<password>@<host>:5432/<dbname>"
+```
+
+#### Common Alembic commands
+
+Run from `backend/` (or pass `-c backend/alembic.ini` from the repository root):
+
+```bash
+cd backend
+
+# Render migration SQL offline without connecting to a database
+alembic upgrade head --sql
+
+# Inspect the current revision applied to DATABASE_URL
+alembic current
+
+# Apply all pending migrations
+alembic upgrade head
+
+# Roll back one revision (or use `base` to revert all revisions in this env)
+alembic downgrade -1
+
+# Generate a new revision from ORM metadata changes
+alembic revision --autogenerate -m "describe schema change"
+```
+
+When running against the Docker Compose stack, execute Alembic inside a one-off
+`api` container (which already receives `DATABASE_URL` from `compose.yaml`):
+
+```bash
+docker compose run --rm api alembic current
+docker compose run --rm api alembic upgrade head
+```
+
+#### Reviewing generated migrations
+
+`alembic revision --autogenerate` only produces a candidate diff against the
+connected database and **must always be reviewed and edited before committing or
+applying**:
+
+- Verify table and foreign-key creation/drop ordering in both `upgrade()` and
+  `downgrade()`.
+- Confirm `CHECK` constraints, `ON DELETE` rules, indexes, nullability, and
+  `server_default` expressions match intended PostgreSQL semantics (autogenerate
+  does not reliably detect arbitrary changes to existing `CHECK` expressions).
+- Check for unintended destructive operations (table/column drops instead of
+  renames) or any accidental changes to non-application objects.
+- Add explicit data backfills when introducing non-nullable columns on populated
+  tables, and ensure `downgrade()` removes only objects created by that
+  revision.
+
 ## Possible Model Evaluation Metric for Model
 - mAP50-95
 - Mean IoU

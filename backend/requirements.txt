@@ -6,3 +6,4 @@ celery>=5.4,<6
 pillow>=10
 sqlalchemy>=2,<3
 psycopg[binary]>=3,<4
+alembic>=1.14,<2

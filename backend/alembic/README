@@ -1,0 +1,5 @@
+Single-database Alembic migration environment for InfraScan application tables.
+
+Supply `DATABASE_URL` in the environment before running online Alembic commands,
+and always review newly generated revisions under `alembic/versions/` before
+committing or applying them.
