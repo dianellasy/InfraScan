@@ -6,6 +6,7 @@ Huy | Nov 4 | [sample_endpoint](#2-smoke-testing-endpoint)
 Huy | Nov 4 | [verified_testing](#3-verified-docker-container-running-and-smoke-test-endpoint-operational)
 Huy | Nov 10| [geolocation_method_update](#4-integrating-geolocation-method)
 Huy | Nov 10| [frontend-backend_contracts](#5-frontend-backend-contracts)
+Huy | Nov 11| [ORM_updates_and_prelim_migration](#6-orm-updates-and-prelim-db-migration)
 
 
 ## 1. docker and component set up 
@@ -68,3 +69,16 @@ Errors:
 Tracking: frontend receive a jobs_id upon **successful** submission of job and will use jobs_id to track
 
 IMPORTANT NOTE: on Nov 10, I will defer auth for now and just focus on getting the core functionality of the geolocation part done. We will do auth after we establish that the MVP is good to go
+
+## 6. ORM updates and prelim db migration
+- created two models: 1) inference_jobs and 2) input_media
+    - inference jobs will populated once the validation succeeds from the controller
+    - pipeline will run iff inference_job is populated, enqueue job_id to rabbitMQ (not implemented yet)
+
+    - because we have not set up s3, we have to use posgres as our object storage, still enforcing the 5MB rule for images
+
+- DB migration
+    - using alembic to handle migration
+    - current schema only have two tables(listed above), must run alembic upgrade head to update postgres 
+
+This commit defines InputMedia for image bytes and InferenceJob for job state and capture metadata. The job references the media row. It also adds an Alembic migration that creates the two application tables when alembic upgrade head is run. The future service will save and commit both rows, then enqueue the job ID for the worker. The existing controller enforces the 5 MB upload limit.
