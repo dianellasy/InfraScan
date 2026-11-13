@@ -21,7 +21,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base
 
 if TYPE_CHECKING:
-    from app.models.media import InputMedia
+    from app.models.detection_record import DetectionRecord
+    from app.models.media import EvidenceMedia, InputMedia
 
 
 class InferenceJobStatus(StrEnum):
@@ -123,4 +124,16 @@ class InferenceJob(Base):
     input_media: Mapped[InputMedia] = relationship(
         "InputMedia",
         back_populates="jobs",
+    )
+    # Children use `ON DELETE RESTRICT`; `passive_deletes="all"` leaves that
+    # enforcement to PostgreSQL instead of nulling their required `job_id`.
+    detection_records: Mapped[list[DetectionRecord]] = relationship(
+        "DetectionRecord",
+        back_populates="job",
+        passive_deletes="all",
+    )
+    evidence_media: Mapped[list[EvidenceMedia]] = relationship(
+        "EvidenceMedia",
+        back_populates="job",
+        passive_deletes="all",
     )

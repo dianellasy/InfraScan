@@ -1,8 +1,8 @@
-from datetime import datetime
-from typing import Protocol, Sequence
-from uuid import UUID
+from __future__ import annotations
 
-from fastapi import UploadFile
+from datetime import datetime
+from typing import TYPE_CHECKING, Protocol, Sequence
+from uuid import UUID
 
 from app.schemas import (
     AnalyticsOverviewDTO,
@@ -10,8 +10,7 @@ from app.schemas import (
     DetectionDTO,
     DetectionEvidenceDTO,
     GeographicAggregateDTO,
-    InferenceJobDTO,
-    InferenceMetadata,
+    InferenceSubmissionMetadata,
     IssueCreate,
     IssueDTO,
     Page,
@@ -19,40 +18,41 @@ from app.schemas import (
     RoadDTO,
 )
 
+if TYPE_CHECKING:
+    from app.models import InferenceJob
+
+# The media, job, and queue adapters below are blocking. The application
+# service calls them from a worker thread, never on the FastAPI event loop.
+# Media and job adapters are session-bound and never commit; the caller owns
+# the transaction.
+
 
 class StoredMedia(Protocol):
-    object_key: str
+    media_id: UUID
     content_type: str
-    filename: str
+    filename: str | None
 
 
 class MediaStorageAdapter(Protocol):
-    async def store(self, files: Sequence[UploadFile]) -> Sequence[StoredMedia]: ...
+    def store(
+        self, data: bytes, content_type: str, filename: str | None
+    ) -> StoredMedia:
+        """Store one validated image inside the caller's open transaction."""
+        ...
 
 
 class InferenceJobRepositoryAdapter(Protocol):
-    async def create(
-        self, metadata: InferenceMetadata, media: Sequence[StoredMedia]
-    ) -> InferenceJobDTO: ...
+    def create_pending(
+        self, media: StoredMedia, metadata: InferenceSubmissionMetadata
+    ) -> InferenceJob: ...
 
-    async def get(self, job_id: UUID) -> InferenceJobDTO | None: ...
-
-    async def list(
-        self,
-        page: int,
-        page_size: int,
-        status: str | None,
-        submitted_after: datetime | None,
-        submitted_before: datetime | None,
-    ) -> Page[InferenceJobDTO]: ...
-
-    async def list_detections(
-        self, job_id: UUID, page: int, page_size: int
-    ) -> Page[DetectionDTO]: ...
+    def get(self, job_id: UUID) -> InferenceJob | None: ...
 
 
 class InferenceQueueAdapter(Protocol):
-    async def enqueue(self, job_id: UUID, media: Sequence[StoredMedia]) -> None: ...
+    def enqueue(self, job_id: UUID) -> None:
+        """Publish only the application job ID; workers load everything else."""
+        ...
 
 
 class IssueRepositoryAdapter(Protocol):

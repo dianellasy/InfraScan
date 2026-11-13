@@ -3,11 +3,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from decimal import Decimal
 import importlib.util
-import os
-from pathlib import Path
-import shutil
-import subprocess
-import tempfile
 from uuid import UUID, uuid4
 
 import pytest
@@ -24,10 +19,12 @@ from app.models import (
     InputMedia,
 )
 from app.schemas import InferenceJobAccepted, InferenceJobDTO
+from postgres_support import BACKEND_DIR
+from postgres_support import run_alembic as _run_alembic
 
-BACKEND_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_DIR.parent
 ALEMBIC_INI = BACKEND_DIR / "alembic.ini"
+HEAD_REVISION = "9e2b6d4f1a37"
 
 
 def _load_alembic_runtime():
@@ -41,55 +38,19 @@ def _load_alembic_runtime():
     return module
 
 
-def _find_pg_bin_dir() -> Path | None:
-    # Prefer PostgreSQL 16 to match `postgres:16-alpine` in `compose.yaml`
-    # and avoid PG 18 `io_uring` syscalls that may be blocked in sandboxes.
-    pg16_bin = Path("/usr/lib/postgresql/16/bin")
-    if (pg16_bin / "initdb").is_file() and (pg16_bin / "pg_ctl").is_file():
-        return pg16_bin
-
-    initdb = shutil.which("initdb")
-    pg_ctl = shutil.which("pg_ctl")
-    if initdb and pg_ctl:
-        return Path(initdb).parent
-
-    pg_root = Path("/usr/lib/postgresql")
-    if pg_root.is_dir():
-        for version_dir in sorted(pg_root.iterdir()):
-            bin_dir = version_dir / "bin"
-            if (bin_dir / "initdb").is_file() and (bin_dir / "pg_ctl").is_file():
-                return bin_dir
-    return None
-
-
-def _run_alembic(
-    *args: str,
-    cwd: Path = BACKEND_DIR,
-    database_url: str | None = None,
-) -> subprocess.CompletedProcess[str]:
-    env = os.environ.copy()
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
-    if database_url is None:
-        env.pop("DATABASE_URL", None)
-    else:
-        env["DATABASE_URL"] = database_url
-
-    alembic_exe = Path(os.sys.executable).with_name("alembic")
-    return subprocess.run(
-        [str(alembic_exe), *args],
-        cwd=cwd,
-        env=env,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-
 def test_shared_metadata_defines_only_application_tables() -> None:
-    assert set(Base.metadata.tables) == {"input_media", "inference_jobs"}
+    assert set(Base.metadata.tables) == {
+        "input_media",
+        "inference_jobs",
+        "evidence_media",
+        "detection_records",
+    }
     assert "users" not in Base.metadata.tables
     assert "celery_taskmeta" not in Base.metadata.tables
     assert "celery_tasksetmeta" not in Base.metadata.tables
+    # Deferred until their tables exist; no placeholders are declared.
+    assert "issues" not in Base.metadata.tables
+    assert "issue_types" not in Base.metadata.tables
 
 
 def test_input_media_model_columns_and_relationship() -> None:
@@ -283,6 +244,15 @@ def test_alembic_renders_upgrade_and_downgrade_sql_offline() -> None:
     assert "ck_inference_jobs_latitude_range" in sql
     assert "ck_inference_jobs_longitude_range" in sql
 
+    evidence_pos = sql.index("CREATE TABLE evidence_media")
+    detections_pos = sql.index("CREATE TABLE detection_records")
+    assert jobs_pos < evidence_pos < detections_pos
+    assert "bounding_box JSONB NOT NULL" in sql
+    assert "location JSONB," in sql
+    assert "confidence DOUBLE PRECISION NOT NULL" in sql
+    assert "REFERENCES issues" not in sql
+    assert "REFERENCES issue_types" not in sql
+
     downgrade = _run_alembic(
         "downgrade",
         "head:base",
@@ -292,8 +262,11 @@ def test_alembic_renders_upgrade_and_downgrade_sql_offline() -> None:
     )
     assert downgrade.returncode == 0, downgrade.stderr
     down_sql = downgrade.stdout
-    assert down_sql.index("DROP TABLE inference_jobs") < down_sql.index(
-        "DROP TABLE input_media"
+    assert (
+        down_sql.index("DROP TABLE detection_records")
+        < down_sql.index("DROP TABLE evidence_media")
+        < down_sql.index("DROP TABLE inference_jobs")
+        < down_sql.index("DROP TABLE input_media")
     )
     assert "celery_taskmeta" not in down_sql
 
@@ -302,120 +275,6 @@ def test_alembic_online_requires_database_url() -> None:
     result = _run_alembic("current", cwd=BACKEND_DIR, database_url=None)
     assert result.returncode != 0
     assert "DATABASE_URL" in result.stderr
-
-
-@pytest.fixture
-def disposable_postgres_url() -> str:
-    pg_bin = _find_pg_bin_dir()
-    if pg_bin is None:
-        pytest.skip("Local PostgreSQL server binaries (initdb/pg_ctl) not installed")
-
-    # Use a short path for Unix domain socket compatibility (< 107 bytes on Linux).
-    base_tmp = Path("/tmp") if os.access("/tmp", os.W_OK) else BACKEND_DIR
-    cluster_root = Path(tempfile.mkdtemp(prefix=".tmp_ispg_", dir=base_tmp))
-    pgdata = cluster_root / "data"
-    socket_dir = cluster_root / "sock"
-    logfile = cluster_root / "postgres.log"
-    socket_dir.mkdir(mode=0o700)
-
-    started = False
-    try:
-        try:
-            init_res = subprocess.run(
-                [
-                    str(pg_bin / "initdb"),
-                    "-D",
-                    str(pgdata),
-                    "-U",
-                    "postgres",
-                    "-A",
-                    "trust",
-                    "--no-locale",
-                    "-E",
-                    "UTF8",
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=12,
-            )
-        except subprocess.TimeoutExpired:
-            pytest.skip("Disposable PostgreSQL initdb timed out in restricted environment")
-
-        if init_res.returncode != 0:
-            pytest.skip(
-                f"Disposable PostgreSQL initdb unavailable: {init_res.stderr.strip()}"
-            )
-
-        pg_opts = (
-            f"-F -c listen_addresses='' "
-            f"-c dynamic_shared_memory_type=mmap -k {socket_dir}"
-        )
-        try:
-            start_res = subprocess.run(
-                [
-                    str(pg_bin / "pg_ctl"),
-                    "-D",
-                    str(pgdata),
-                    "-l",
-                    str(logfile),
-                    "-o",
-                    pg_opts,
-                    "-t",
-                    "8",
-                    "-w",
-                    "start",
-                ],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=12,
-            )
-        except subprocess.TimeoutExpired:
-            pytest.skip("Disposable PostgreSQL start timed out in restricted environment")
-
-        if start_res.returncode != 0:
-            log_tail = logfile.read_text(encoding="utf-8") if logfile.exists() else ""
-            pytest.skip(f"Disposable PostgreSQL start unavailable: {log_tail}")
-        started = True
-
-        subprocess.run(
-            [
-                str(pg_bin / "createdb"),
-                "-h",
-                str(socket_dir),
-                "-U",
-                "postgres",
-                "infrascan_test",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-
-        # Supply standard `postgresql://` scheme so Alembic exercises driver normalization.
-        yield f"postgresql://postgres@/infrascan_test?host={socket_dir}"
-    finally:
-        if started:
-            subprocess.run(
-                [
-                    str(pg_bin / "pg_ctl"),
-                    "-D",
-                    str(pgdata),
-                    "-m",
-                    "immediate",
-                    "-t",
-                    "5",
-                    "-w",
-                    "stop",
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=8,
-            )
-        shutil.rmtree(cluster_root, ignore_errors=True)
 
 
 def test_disposable_postgres_upgrade_constraints_orm_and_downgrade(
@@ -443,7 +302,7 @@ def test_disposable_postgres_upgrade_constraints_orm_and_downgrade(
 
         cur = _run_alembic("current", database_url=disposable_postgres_url)
         assert cur.returncode == 0, cur.stderr
-        assert "7c4e9a1b2d01 (head)" in cur.stdout
+        assert f"{HEAD_REVISION} (head)" in cur.stdout
 
         # Verify zero drift between ORM metadata and migration, ignoring Celery tables.
         chk = _run_alembic("check", database_url=disposable_postgres_url)
@@ -566,13 +425,15 @@ def test_disposable_postgres_upgrade_constraints_orm_and_downgrade(
             session.delete(stored_media)
             session.commit()
 
-        # Downgrade to base must remove only input_media and inference_jobs,
-        # preserving pre-existing Celery result-backend tables.
+        # Downgrade to base must remove only application tables, preserving
+        # pre-existing Celery result-backend tables.
         down = _run_alembic("downgrade", "base", database_url=disposable_postgres_url)
         assert down.returncode == 0, down.stderr
 
         inspector = sa.inspect(engine)
         remaining_tables = set(inspector.get_table_names())
+        assert "detection_records" not in remaining_tables
+        assert "evidence_media" not in remaining_tables
         assert "inference_jobs" not in remaining_tables
         assert "input_media" not in remaining_tables
         assert {"celery_taskmeta", "celery_tasksetmeta"}.issubset(remaining_tables)

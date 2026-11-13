@@ -59,10 +59,13 @@ and Pydantic DTOs described in the architecture design:
 The API handlers depend on the `InfraScanService` contract in
 `backend/app/services/contracts.py`. Infrastructure boundaries for media
 storage, inference-job persistence, task queuing, and domain repositories are
-declared in `backend/app/adapters/ports.py`. Concrete service and adapter
-implementations are not configured yet; until an application service is
-attached to `app.state.infrascan_service`, API calls return `503 Service
-Unavailable` rather than successful placeholder data.
+declared in `backend/app/adapters/ports.py`. When `DATABASE_URL` is set, the
+app's startup lifespan (`backend/main.py`) attaches the PostgreSQL-backed
+`DatabaseInfraScanService` (`backend/app/services/inference_jobs.py`). It
+implements inference submission, `GET /api/v1/jobs/{job_id}`, and
+`GET /api/v1/jobs/{job_id}/detections`; the other endpoints return
+`501 NOT_IMPLEMENTED`. Without `DATABASE_URL`, no service is attached and API
+calls return `503 Service Unavailable` rather than placeholder data.
 
 Install backend dependencies with `python -m pip install -r backend/requirements.txt`.
 Run the API from the backend directory with `uvicorn main:app --reload`; the
@@ -119,12 +122,80 @@ production request will carry `Authorization: Bearer <token>` and the backend
 will derive the authenticated user ID; client-supplied user IDs are rejected as
 unknown metadata.
 
-The eventual application service must store the media, create and commit the
-database job with its metadata and stored-media reference, enqueue work by the
-application job ID, and return the acceptance DTO. The database job must be
-committed before a worker can consume it, and dispatch failures need explicit
-handling. Those storage, database, queue, tracking, and authentication
-implementations are not part of the controller milestone.
+After validation, the application service reads the upload and, in one
+transaction, stores it as `InputMedia` (content type `image/jpeg`, taken from
+validation rather than the client) and creates a `pending` `InferenceJob` with
+`captured_at`, `latitude`, and `longitude`. Only after that commit does it
+publish the Celery task `infrascan.process_inference_job` whose single argument
+is the job ID string. `submitted_at` is the persisted `created_at`. The request
+never waits for inference. Database and broker calls run in a worker thread,
+off the event loop, each with its own short-lived session.
+
+- If the database is unreachable, the response is
+  `503 SUBMISSION_DEPENDENCY_UNAVAILABLE` and nothing is enqueued. Any other
+  persistence error rolls back both rows and returns `500 INTERNAL_ERROR`.
+- If publishing fails, the response is `503 SUBMISSION_DEPENDENCY_UNAVAILABLE`
+  and the already-committed job is marked `failed` (best effort).
+
+### Inference worker
+
+The Celery task (`backend/inference/celery/tasks.py`) receives only the job ID
+and uses `InferenceJobProcessor` (`backend/app/services/inference_processing.py`):
+
+1. In a short transaction, it row-locks the job. If the job is still
+   `pending`, it marks it `running` with `started_at` and reads the input image,
+   then commits and closes the session. Unknown or non-pending jobs are logged
+   and skipped.
+2. It runs the v0-mvp pipeline with no session open
+   (`inference_with_annotation` in `backend/inference/service.py`). Weights,
+   confidence threshold, preprocessing, and the severity heuristic are the same
+   as in `inference_service`. The annotated JPEG is encoded in memory for this
+   invocation and is never read from the shared `data/outputs/annotated.jpg`.
+3. In one new transaction, it saves one `EvidenceMedia` row, one
+   `DetectionRecord` per detection (all pointing to that evidence row),
+   `model_version`, and `completed`/`completed_at`. A completed job therefore
+   always has its saved output. An empty detection list is a successful job with
+   zero detection rows (the annotated image is still stored).
+4. If inference raises, its output is malformed, or the result transaction
+   fails, the error is logged with the job ID and the job is marked `failed`
+   when the database is reachable. `completed_at` stays NULL for failed jobs.
+
+The original upload stays linked to the job. The Celery task ID is separate
+from the application job ID and is not stored. Task return values are ignored
+because results are stored in the application tables. The worker creates its
+engine lazily in each process and discards any inherited pool after a prefork
+fork. The existing `POST /api/v1/inference/smoke-test` endpoint and
+`infrascan.inference` task are unchanged.
+
+### Job tracking
+
+`GET /api/v1/jobs/{job_id}` returns the existing `InferenceJobDTO` fields from
+PostgreSQL (`submitted_at` from `created_at`, capture metadata under `metadata`,
+and an additional `model_version` field). `GET /api/v1/jobs/{job_id}/detections`
+keeps the `page`/`page_size` pagination and returns an empty `items` list for
+completed jobs with no detections. Both return `404` with
+`{"error":{"code":"JOB_NOT_FOUND",...}}` for unknown jobs. Each detection keeps
+the existing fields (`classification` is derived from the stored class ID;
+`latitude`/`longitude` are NULL until detection GPS exists) and adds
+`issue_id`, `issue_type`, `evidence_media`, `location`, `bounding_box`, and
+`frame_timestamp`.
+
+### Deferred limitations (post-MVP)
+
+- No retries. A failed job stays `failed`.
+- No transactional outbox. If the process dies between the commit and the
+  publish, the job stays `pending` and nothing republishes it.
+- No duplicate-delivery guarantees. The row lock and `pending` check stop a
+  redelivered message from reprocessing a job that has already been claimed,
+  but this is not idempotent delivery.
+- No recovery for stranded jobs. Jobs left `pending` or `running` after a crash
+  (for example, a worker killed during inference; `task_acks_late` causes
+  redelivery, and the redelivered message is skipped because the job is
+  `running`) need manual handling.
+- Failed jobs do not store an error message, so `error` in the job DTO stays
+  NULL.
+- Detection GPS (`location`) is not calculated yet, and `frame_timestamp` is
+  NULL for still images.
 
 The controller bounds reads of the uploaded file, but this is not a
 server-wide request-body limit. Production deployment must separately
@@ -150,6 +221,38 @@ declarative `Base` in `backend/app/models/base.py`:
   `completed_at` (nullable `TIMESTAMPTZ`), `captured_at` (required
   `TIMESTAMPTZ`), `latitude` (required `NUMERIC` in `[-90, 90]`), and
   `longitude` (required `NUMERIC` in `[-180, 180]`).
+- `EvidenceMedia` (`evidence_media`): stores the annotated evidence JPEG,
+  separate from the input. Columns are `media_id` (UUID primary key), `job_id`
+  (required, indexed foreign key to `inference_jobs`), `data` (`BYTEA`),
+  `content_type`, and `filename` (nullable). All detections from one processed
+  image share one evidence row.
+- `DetectionRecord` (`detection_records`): one row per detection. Columns are
+  `detection_id` (UUID primary key); `job_id` (required, indexed, non-unique
+  foreign key to `inference_jobs`, so one job has zero or more detections);
+  `issue_id` (nullable UUID, NULL for now); and `issue_type` (required integer).
+  `evidence_media` is a nullable foreign key to `evidence_media.media_id`.
+  `location` is nullable `JSONB` (`{"latitude": ..., "longitude": ...}`, NULL
+  for now). `confidence` is a required double in `[0, 1]`. `severity` is
+  required and must be `minor`, `moderate`, or `critical`. `bounding_box` is a
+  required `JSONB` array of four numbers. `frame_timestamp` is a nullable
+  nonnegative offset in seconds, NULL for still images. `detected_at` is a
+  required `TIMESTAMPTZ` that the worker sets in UTC when inference finishes.
+  All of the new foreign keys use `ON DELETE RESTRICT`.
+
+**Provisional `issue_type`:** For now, `issue_type` stores the v0-mvp model
+class ID (`0` Longitudinal crack, `1` Transverse crack, `2` Alligator crack,
+`3` Pothole). That mapping is defined once in `backend/inference/labels.py`.
+These are model class IDs, not permanent domain identifiers. The intended
+foreign keys from `issue_id` and `issue_type` to `issues` and `issue_types` are
+deferred because those tables do not exist yet. No placeholder tables or
+references are declared. A later issue-types migration must define the mapping
+from class IDs and convert stored values.
+
+**Bounding boxes:** `bounding_box` is `[x1, y1, x2, y2]` in fractional pixels of
+the image the model received, at its original dimensions. It is not a
+normalized YOLO training coordinate and is not on a fixed 640×640 grid. The
+pipeline does not apply EXIF orientation, so coordinates refer to the stored
+pixel grid.
 
 **API timestamp mapping (`created_at` <-> `submitted_at`):** The public HTTP
 contract (`InferenceJobAccepted`, `InferenceJobDTO`, and the `submitted_after` /
@@ -225,6 +328,70 @@ applying**:
   tables, and ensure `downgrade()` removes only objects created by that
   revision.
 
+#### Migration history
+
+| Revision | Creates |
+| --- | --- |
+| `7c4e9a1b2d01` | `input_media`, `inference_jobs` |
+| `9e2b6d4f1a37` (head) | `evidence_media`, `detection_records` |
+
+### Running the inference workflow
+
+The API and the worker both need `DATABASE_URL` and `CELERY_BROKER_URL`. The
+schema must be at `alembic upgrade head` before the first submission.
+
+With Docker Compose:
+
+```bash
+docker compose up -d db rabbitmq
+docker compose run --rm api alembic upgrade head
+docker compose up --build api worker
+```
+
+Without Docker (PostgreSQL and RabbitMQ already running; the worker
+environment additionally needs `ultralytics`/`torch`, as in
+`backend/inference/Dockerfile`):
+
+```bash
+cd backend
+export DATABASE_URL="postgresql://infrascan:infrascan_dev@localhost:5432/infrascan"
+export CELERY_BROKER_URL="amqp://infrascan:infrascan_dev@localhost:5672//"
+alembic upgrade head
+uvicorn main:app --reload                               # API
+celery -A inference.celery worker --loglevel=info       # worker, separate shell
+```
+
+Submit an image, then poll the returned application job ID:
+
+```bash
+curl --request POST http://localhost:8000/api/v1/inference/jobs \
+  --form 'file=@road.jpg;type=image/jpeg' \
+  --form 'metadata={"captured_at":"2026-11-10T14:30:00-08:00","latitude":33.8823,"longitude":-117.8851}'
+curl http://localhost:8000/api/v1/jobs/<job_id>
+curl "http://localhost:8000/api/v1/jobs/<job_id>/detections?page=1&page_size=50"
+```
+
+The model CLI smoke check now runs as a module from `backend/` because
+`service.py` imports `inference.labels`:
+`python -m inference.service`.
+
+### Backend tests
+
+Run from `backend/`:
+
+```bash
+python -m pytest tests
+```
+
+PostgreSQL-backed tests start a disposable local cluster (PostgreSQL 16
+`initdb`/`pg_ctl`; they are skipped if those binaries are not installed) and
+build the schema with `alembic upgrade head`. Most workflow tests mock the model
+with `tests/fixtures/v0_mvp_multi_png_output.json`, which is real v0-mvp output
+on `inference/data/uploads/multi.png`. `tests/test_real_model_pipeline.py` runs
+the shipped weights. It covers HTTP submission, a Celery worker on an in-memory
+broker, YOLO, PostgreSQL, and the tracking endpoints. It runs only when
+`ultralytics` is importable and is skipped otherwise.
+
 ## Possible Model Evaluation Metric for Model
 - mAP50-95
 - Mean IoU
@@ -257,10 +424,10 @@ docker compose up --build
 The API is available at `http://localhost:8000` and its interactive schema at
 `http://localhost:8000/docs`. PostgreSQL is available on port `5432`; the API
 container receives its connection string in `DATABASE_URL` and waits for the
-database health check before starting. The current API does not yet configure a
-database adapter, so this provides the container and connection settings but
-does not enable persistence. The example database credentials are for local
-development only; change them in `.env` before using this setup elsewhere.
+database health check before starting. Apply migrations before the first
+submission (see [Running the inference workflow](#running-the-inference-workflow)).
+The example database credentials are for local development only; change them in
+`.env` before using this setup elsewhere.
 
 Stop the containers with `docker compose down`. To also remove the local
 database volume, run `docker compose down --volumes`.

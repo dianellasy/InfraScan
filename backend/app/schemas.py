@@ -83,6 +83,7 @@ class InferenceJobDTO(InferenceJobAccepted):
     completed_at: datetime | None = None
     error: str | None = None
     metadata: InferenceMetadata | None = None
+    model_version: str | None = None
 
 
 class IssueCreate(BaseModel):
@@ -117,6 +118,11 @@ class RoadDTO(BaseModel):
     metadata: dict[str, object] = Field(default_factory=dict)
 
 
+class DetectionLocation(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+
 class DetectionDTO(BaseModel):
     detection_id: UUID
     job_id: UUID
@@ -127,6 +133,20 @@ class DetectionDTO(BaseModel):
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     detected_at: datetime
+    issue_id: UUID | None = None
+    # Provisional: the v0-mvp model class ID, not a permanent issue-type ID.
+    issue_type: int | None = None
+    evidence_media: UUID | None = None
+    location: DetectionLocation | None = None
+    bounding_box: (
+        Annotated[list[float], Field(min_length=4, max_length=4)] | None
+    ) = Field(
+        default=None,
+        description=(
+            "[x1, y1, x2, y2] in pixels of the original prediction source image."
+        ),
+    )
+    frame_timestamp: float | None = Field(default=None, ge=0)
 
 
 class EvidenceFrameDTO(BaseModel):

@@ -16,8 +16,8 @@ from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.api.dependencies import get_service
+from app.api.errors import error_response as _error_response
 from app.schemas import (
-    APIError,
     APIErrorResponse,
     InferenceJobAccepted,
     InferenceSubmissionMetadata,
@@ -67,18 +67,6 @@ class _ContractError(Exception):
     code: str
     message: str
     field: str | None = None
-
-
-def _error_response(
-    status_code: int, code: str, message: str, field: str | None = None
-) -> JSONResponse:
-    payload = APIErrorResponse(
-        error=APIError(code=code, message=message, field=field)
-    )
-    return JSONResponse(
-        status_code=status_code,
-        content=payload.model_dump(mode="json", exclude_none=True),
-    )
 
 
 def _get_submission_service(request: Request) -> InfraScanService | None:

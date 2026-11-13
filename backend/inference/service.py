@@ -3,18 +3,17 @@ import os
 from io import BytesIO
 from pathlib import Path
 
+import cv2
 import numpy as np
 from PIL import Image
 from ultralytics import YOLO
 
+from inference.labels import CLASS_LABELS, class_label
+
 # Class order must match the training labels (see ml/data/prepare_rdd2022.py):
-# 0 D00, 1 D10, 2 D20, 3 D40 from RDD2022.
-label_map = {
-    0: "Longitudinal crack",
-    1: "Transverse crack",
-    2: "Alligator crack",
-    3: "Pothole",
-}
+# 0 D00, 1 D10, 2 D20, 3 D40 from RDD2022. Defined in inference/labels.py so
+# the API can map stored class IDs without importing the model stack.
+label_map = CLASS_LABELS
 
 # Which model made a detection. Update both when weights/best.pt changes.
 MODEL_NAME = "infrascan-rdd2022-yolo11s"
@@ -95,7 +94,7 @@ def normalize_input(data, h, w):
         class_id = int(datum[5])
         x1, y1, x2, y2 = (float(v) for v in datum[:4])
         area_fraction = max(0.0, x2 - x1) * max(0.0, y2 - y1) / float(w * h) if w and h else 0.0
-        label = label_map.get(class_id, f"class_{class_id}")
+        label = class_label(class_id)
         detections.append({
             "class_ids": class_id,
             "label": label,
@@ -131,15 +130,33 @@ def _as_predict_source(image_input, filename=None):
     return image
 
 
-def inference_service(model_file_path, image_input, filename=None):
+def _predict(model_file_path, image_input, filename=None):
     model = get_model(model_file_path)
     source = _as_predict_source(image_input, filename=filename)
     result = model.predict(source, conf=CONF_THRESHOLD, imgsz=IMG_SIZE, verbose=False)[0]
     h, w = result.orig_shape
-    inference_obj = normalize_input(result.boxes.data, h, w)
+    return result, normalize_input(result.boxes.data, h, w)
+
+
+def inference_service(model_file_path, image_input, filename=None):
+    result, inference_obj = _predict(model_file_path, image_input, filename=filename)
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     result.save(filename=str(OUTPUT_PATH))
     return inference_obj
+
+
+def inference_with_annotation(model_file_path, image_input, filename=None):
+    """Run inference and return (result JSON, annotated JPEG bytes).
+
+    The annotated image belongs to this invocation only and is never written
+    to OUTPUT_PATH, so concurrent jobs cannot read each other's evidence.
+    Encoding matches `result.save()` (cv2 JPEG of `result.plot()`).
+    """
+    result, inference_obj = _predict(model_file_path, image_input, filename=filename)
+    encoded_ok, encoded = cv2.imencode(".jpg", result.plot())
+    if not encoded_ok:
+        raise RuntimeError("Could not encode the annotated image as JPEG")
+    return inference_obj, encoded.tobytes()
 
 
 def main():

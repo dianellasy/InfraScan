@@ -2,13 +2,28 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
+from fastapi.responses import JSONResponse
 
 from app.api.dependencies import get_service
-from app.schemas import DetectionDTO, InferenceJobDTO, Page
-from app.services.contracts import InfraScanService
+from app.api.errors import error_response
+from app.schemas import APIErrorResponse, DetectionDTO, InferenceJobDTO, Page
+from app.services.contracts import InfraScanService, JobNotFoundError
 
 router = APIRouter(prefix="/jobs", tags=["inference jobs"])
+
+_JOB_NOT_FOUND_RESPONSES = {
+    404: {"model": APIErrorResponse, "description": "Unknown inference job"},
+}
+
+
+def _job_not_found() -> JSONResponse:
+    return error_response(
+        status.HTTP_404_NOT_FOUND,
+        "JOB_NOT_FOUND",
+        "The inference job was not found.",
+        "job_id",
+    )
 
 
 @router.get("", response_model=Page[InferenceJobDTO])
@@ -25,19 +40,33 @@ async def list_jobs(
     )
 
 
-@router.get("/{job_id}", response_model=InferenceJobDTO)
+@router.get(
+    "/{job_id}",
+    response_model=InferenceJobDTO,
+    responses=_JOB_NOT_FOUND_RESPONSES,
+)
 async def get_job(
     job_id: UUID,
     service: Annotated[InfraScanService, Depends(get_service)],
-) -> InferenceJobDTO:
-    return await service.get_job(job_id)
+) -> InferenceJobDTO | JSONResponse:
+    try:
+        return await service.get_job(job_id)
+    except JobNotFoundError:
+        return _job_not_found()
 
 
-@router.get("/{job_id}/detections", response_model=Page[DetectionDTO])
+@router.get(
+    "/{job_id}/detections",
+    response_model=Page[DetectionDTO],
+    responses=_JOB_NOT_FOUND_RESPONSES,
+)
 async def list_job_detections(
     job_id: UUID,
     service: Annotated[InfraScanService, Depends(get_service)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 50,
-) -> Page[DetectionDTO]:
-    return await service.list_job_detections(job_id, page, page_size)
+) -> Page[DetectionDTO] | JSONResponse:
+    try:
+        return await service.list_job_detections(job_id, page, page_size)
+    except JobNotFoundError:
+        return _job_not_found()

@@ -3,13 +3,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from sqlalchemy import LargeBinary, String, Uuid, text
+from sqlalchemy import ForeignKey, LargeBinary, String, Uuid, text
 from sqlalchemy.dialects.postgresql import BYTEA
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
 
 if TYPE_CHECKING:
+    from app.models.detection_record import DetectionRecord
     from app.models.inference_job import InferenceJob
 
 
@@ -43,5 +44,50 @@ class InputMedia(Base):
     jobs: Mapped[list[InferenceJob]] = relationship(
         "InferenceJob",
         back_populates="input_media",
+        passive_deletes="all",
+    )
+
+
+class EvidenceMedia(Base):
+    """Annotated evidence image produced by one inference job.
+
+    Stored separately from `InputMedia` so the original upload stays intact.
+    All detections from the same processed image share one evidence row.
+    """
+
+    __tablename__ = "evidence_media"
+
+    media_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        server_default=text("gen_random_uuid()"),
+    )
+    job_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("inference_jobs.job_id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    data: Mapped[bytes] = mapped_column(
+        LargeBinary().with_variant(BYTEA(), "postgresql"),
+        nullable=False,
+    )
+    content_type: Mapped[str] = mapped_column(
+        String(),
+        nullable=False,
+    )
+    filename: Mapped[str | None] = mapped_column(
+        String(),
+        nullable=True,
+    )
+
+    job: Mapped[InferenceJob] = relationship(
+        "InferenceJob",
+        back_populates="evidence_media",
+    )
+    detection_records: Mapped[list[DetectionRecord]] = relationship(
+        "DetectionRecord",
+        back_populates="evidence",
         passive_deletes="all",
     )
