@@ -26,6 +26,8 @@ type Page<T> = {
   total: number;
 };
 
+const MAX_FILE_SIZE = 5_000_000;
+
 function isTerminal(status: string) {
   return ["completed", "complete", "succeeded", "success", "done", "failed", "error", "cancelled"].includes(
     status.toLowerCase(),
@@ -48,6 +50,15 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
       if (
         typeof parsed === "object" &&
         parsed !== null &&
+        "error" in parsed &&
+        typeof parsed.error === "object" &&
+        parsed.error !== null &&
+        "message" in parsed.error
+      ) {
+        message = String(parsed.error.message);
+      } else if (
+        typeof parsed === "object" &&
+        parsed !== null &&
         "detail" in parsed
       ) {
         message = String(parsed.detail);
@@ -61,8 +72,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 function App() {
-  const [files, setFiles] = useState<File[]>([]);
-  const [sourceId, setSourceId] = useState("");
+  const [file, setFile] = useState<File | null>(null);
   const [capturedAt, setCapturedAt] = useState("");
   const [latitude, setLatitude] = useState("");
   const [longitude, setLongitude] = useState("");
@@ -128,8 +138,44 @@ function App() {
 
   async function submitImages(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (files.length === 0) {
-      setError("Choose at least one image to submit.");
+    if (!file) {
+      setError("Choose a JPEG image to submit.");
+      return;
+    }
+    if (!/\.jpe?g$/i.test(file.name)) {
+      setError("Choose a .jpg or .jpeg image.");
+      return;
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      setError("The image must be 5,000,000 bytes or smaller.");
+      return;
+    }
+    if (!capturedAt) {
+      setError("Enter the capture date and time.");
+      return;
+    }
+    if (!latitude.trim()) {
+      setError("Enter the latitude.");
+      return;
+    }
+    if (!longitude.trim()) {
+      setError("Enter the longitude.");
+      return;
+    }
+
+    const capturedDate = new Date(capturedAt);
+    const latitudeNumber = Number(latitude);
+    const longitudeNumber = Number(longitude);
+    if (Number.isNaN(capturedDate.getTime())) {
+      setError("Enter a valid capture date and time.");
+      return;
+    }
+    if (!Number.isFinite(latitudeNumber) || latitudeNumber < -90 || latitudeNumber > 90) {
+      setError("Latitude must be a number from -90 to 90.");
+      return;
+    }
+    if (!Number.isFinite(longitudeNumber) || longitudeNumber < -180 || longitudeNumber > 180) {
+      setError("Longitude must be a number from -180 to 180.");
       return;
     }
 
@@ -139,14 +185,14 @@ function App() {
     setDetections([]);
     setDetectionTotal(0);
 
-    const metadata: Record<string, string | number> = {};
-    if (sourceId.trim()) metadata.source_id = sourceId.trim();
-    if (capturedAt) metadata.captured_at = new Date(capturedAt).toISOString();
-    if (latitude.trim()) metadata.latitude = Number(latitude);
-    if (longitude.trim()) metadata.longitude = Number(longitude);
+    const metadata = {
+      captured_at: capturedDate.toISOString(),
+      latitude: latitudeNumber,
+      longitude: longitudeNumber,
+    };
 
     const formData = new FormData();
-    files.forEach((file) => formData.append("files", file));
+    formData.append("file", file);
     formData.append("metadata", JSON.stringify(metadata));
 
     try {
@@ -199,7 +245,7 @@ function App() {
           <div className="panel-heading">
             <div>
               <p className="eyebrow">NEW SUBMISSION</p>
-              <h2>Upload images</h2>
+              <h2>Upload image</h2>
             </div>
             <span className="step-number">01</span>
           </div>
@@ -207,47 +253,46 @@ function App() {
           <form onSubmit={submitImages}>
             <label className="file-drop">
               <span className="upload-icon" aria-hidden="true">↑</span>
-              <strong>Choose road images</strong>
-              <span>PNG, JPG, JPEG, or WEBP · multiple files allowed</span>
+              <strong>Choose a road image</strong>
+              <span>JPEG (.jpg or .jpeg) · max 5,000,000 bytes · max longest side 4032 px, max shortest side 3024 px</span>
               <input
                 type="file"
-                accept="image/*"
-                multiple
-                onChange={(event) => setFiles(Array.from(event.currentTarget.files ?? []))}
+                accept=".jpg,.jpeg,image/jpeg"
+                onChange={(event) => {
+                  const selectedFile = event.currentTarget.files?.[0] ?? null;
+                  if (selectedFile && selectedFile.size > MAX_FILE_SIZE) {
+                    setFile(null);
+                    setError("The image must be 5,000,000 bytes or smaller.");
+                    event.currentTarget.value = "";
+                    return;
+                  }
+                  setFile(selectedFile);
+                  setError("");
+                }}
               />
             </label>
 
-            {files.length > 0 && (
+            {file && (
               <div className="selected-files" aria-live="polite">
-                <strong>{files.length} image{files.length === 1 ? "" : "s"} selected</strong>
+                <strong>Image selected</strong>
                 <ul>
-                  {files.map((file, index) => (
-                    <li key={`${file.name}-${file.lastModified}-${index}`}>
-                      <span>{file.name}</span>
-                      <span>{(file.size / (1024 * 1024)).toFixed(2)} MB</span>
-                    </li>
-                  ))}
+                  <li>
+                    <span>{file.name}</span>
+                    <span>{file.size.toLocaleString()} bytes</span>
+                  </li>
                 </ul>
               </div>
             )}
 
-            <details className="metadata-fields">
-              <summary>Optional image details</summary>
+            <div className="metadata-fields">
               <div className="field-grid">
-                <label>
-                  Source ID
-                  <input
-                    value={sourceId}
-                    onChange={(event) => setSourceId(event.target.value)}
-                    placeholder="Camera or survey identifier"
-                  />
-                </label>
                 <label>
                   Capture date and time
                   <input
                     type="datetime-local"
                     value={capturedAt}
                     onChange={(event) => setCapturedAt(event.target.value)}
+                    required
                   />
                 </label>
                 <label>
@@ -260,6 +305,7 @@ function App() {
                     value={latitude}
                     onChange={(event) => setLatitude(event.target.value)}
                     placeholder="e.g. 37.7749"
+                    required
                   />
                 </label>
                 <label>
@@ -272,10 +318,11 @@ function App() {
                     value={longitude}
                     onChange={(event) => setLongitude(event.target.value)}
                     placeholder="e.g. -122.4194"
+                    required
                   />
                 </label>
               </div>
-            </details>
+            </div>
 
             <button className="primary-button" type="submit" disabled={submitting}>
               {submitting ? "Submitting…" : "Submit for analysis"}
@@ -316,7 +363,7 @@ function App() {
             </div>
           ) : (
             <p className="empty-state">
-              Submit one or more images to start an analysis job. Its status will appear here.
+              Submit a JPEG image to start an analysis job. Its status will appear here.
             </p>
           )}
         </section>
