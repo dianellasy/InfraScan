@@ -1,3 +1,6 @@
-IMPORTANT: The following weights (as of nov.4, 2026) is a sample
-model that is pretty bad. This is only used as a stub to smoke test
-pipeline before MVP
+best.pt = infrascan-rdd2022-yolo11s, version v0-mvp (11 Nov 2026).
+YOLO11s trained on RDD2022 (4 classes, order: 0 Longitudinal crack,
+1 Transverse crack, 2 Alligator crack, 3 Pothole). Input size 640.
+Pothole at confidence 0.25 on our test split: precision 0.645, recall 0.393.
+This does NOT meet the PRD pothole target (90% precision, 85% recall).
+Full numbers and limits: ml/MODEL_CARD.md

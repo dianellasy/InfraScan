@@ -1,2 +1,11 @@
 .env
 .venv/
+
+# ML work (Atul)
+ml/.venv-win/
+ml/runs/
+ml/datasets/
+ml/**/__pycache__/
+*.cache
+runs/
+ml/kaggle/*/run.py

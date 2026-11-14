@@ -27,6 +27,10 @@ class SubmissionDependencyUnavailableError(Exception):
     """A required storage, persistence, or queue dependency is unavailable."""
 
 
+class JobNotFoundError(LookupError):
+    """No inference job exists for the requested application job ID."""
+
+
 class InfraScanService(Protocol):
     async def submit_inference(
         self, file: UploadFile, metadata: InferenceSubmissionMetadata

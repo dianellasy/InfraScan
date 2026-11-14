@@ -2,6 +2,9 @@ import os
 
 from celery import Celery
 
+# Production task. Its only argument is the application job_id as a string.
+PROCESS_INFERENCE_JOB_TASK = "infrascan.process_inference_job"
+
 celery_app = Celery(
     "infrascan",
     broker=os.environ.get(
