@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
-    JSON,
     CheckConstraint,
     DateTime,
     Double,
@@ -16,10 +15,10 @@ from sqlalchemy import (
     Uuid,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base
+from app.geolocation.projection import PROJECTION_STATUSES
+from app.models.base import Base, jsonb_type
 
 if TYPE_CHECKING:
     from app.models.inference_job import InferenceJob
@@ -56,11 +55,9 @@ LOCATION_CHECK = (
     "AND (location ->> 'longitude')::numeric BETWEEN -180 AND 180 "
     "ELSE false END"
 )
-
-
-def _jsonb() -> JSON:
-    # Persist Python None as SQL NULL rather than the JSON literal `null`.
-    return JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql")
+LOCATION_STATUS_CHECK = "location_status IS NULL OR location_status IN ({})".format(
+    ", ".join(f"'{status}'" for status in PROJECTION_STATUSES)
+)
 
 
 class DetectionRecord(Base):
@@ -72,10 +69,17 @@ class DetectionRecord(Base):
     the `issues` and `issue_types` tables exist; that later migration must
     define the class-ID mapping and convert stored values.
 
-    `bounding_box` is `[x1, y1, x2, y2]` in pixels of the prediction source
-    image at its original dimensions (not normalized YOLO coordinates and not
-    a fixed 640x640 grid). `location` stays NULL until detection-level GPS is
-    calculated; capture coordinates remain on `InferenceJob`.
+    `bounding_box` is `[x1, y1, x2, y2]` in pixels of the upright
+    (EXIF-applied) prediction source image at its original dimensions (not
+    normalized YOLO coordinates and not a fixed 640x640 grid).
+
+    `location` is the estimated WGS84 `{"latitude", "longitude"}` of the
+    detection's road contact point, set only when `location_status` is
+    `estimated`. Other statuses explain why no coordinate was produced; NULL
+    means geolocation was not attempted (the job had no camera setup).
+    `location_details` keeps the contact pixel, east/north offsets in meters,
+    and any explanatory message. Source GPS and camera provenance live on
+    `InferenceJob`.
     """
 
     __tablename__ = "detection_records"
@@ -94,6 +98,7 @@ class DetectionRecord(Base):
         ),
         CheckConstraint(BOUNDING_BOX_CHECK, name="bounding_box_xyxy"),
         CheckConstraint(LOCATION_CHECK, name="location_lat_lon"),
+        CheckConstraint(LOCATION_STATUS_CHECK, name="location_status_allowed"),
     )
 
     detection_id: Mapped[UUID] = mapped_column(
@@ -123,7 +128,15 @@ class DetectionRecord(Base):
         index=True,
     )
     location: Mapped[dict[str, Any] | None] = mapped_column(
-        _jsonb(),
+        jsonb_type(),
+        nullable=True,
+    )
+    location_status: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+    )
+    location_details: Mapped[dict[str, Any] | None] = mapped_column(
+        jsonb_type(),
         nullable=True,
     )
     confidence: Mapped[float] = mapped_column(
@@ -135,7 +148,7 @@ class DetectionRecord(Base):
         nullable=False,
     )
     bounding_box: Mapped[list[float]] = mapped_column(
-        _jsonb(),
+        jsonb_type(),
         nullable=False,
     )
     frame_timestamp: Mapped[float | None] = mapped_column(

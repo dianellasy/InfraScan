@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, Protocol, Sequence
 from uuid import UUID
 
 from app.schemas import (
@@ -43,7 +43,10 @@ class MediaStorageAdapter(Protocol):
 
 class InferenceJobRepositoryAdapter(Protocol):
     def create_pending(
-        self, media: StoredMedia, metadata: InferenceSubmissionMetadata
+        self,
+        media: StoredMedia,
+        metadata: InferenceSubmissionMetadata,
+        geolocation: dict[str, Any] | None = None,
     ) -> InferenceJob: ...
 
     def get(self, job_id: UUID) -> InferenceJob | None: ...

@@ -24,7 +24,7 @@ from postgres_support import run_alembic as _run_alembic
 
 REPO_ROOT = BACKEND_DIR.parent
 ALEMBIC_INI = BACKEND_DIR / "alembic.ini"
-HEAD_REVISION = "9e2b6d4f1a37"
+HEAD_REVISION = "c3f8a2d6e915"
 
 
 def _load_alembic_runtime():
@@ -94,6 +94,7 @@ def test_inference_job_model_columns_defaults_and_constraints() -> None:
         "captured_at",
         "latitude",
         "longitude",
+        "geolocation",
     }
 
     assert table.c.job_id.primary_key is True
@@ -149,6 +150,12 @@ def test_inference_job_model_columns_defaults_and_constraints() -> None:
     assert table.c.latitude.nullable is False
     assert isinstance(table.c.longitude.type, sa.Numeric)
     assert table.c.longitude.nullable is False
+
+    # Geolocation provenance is optional (NULL when no camera setup applies).
+    assert table.c.geolocation.nullable is True
+    assert isinstance(
+        table.c.geolocation.type.dialect_impl(postgresql.dialect()), postgresql.JSONB
+    )
 
     check_names = {
         constraint.name

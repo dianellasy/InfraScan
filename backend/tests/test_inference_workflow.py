@@ -230,7 +230,7 @@ def test_job_insert_failure_rolls_back_media_and_does_not_enqueue(
     status_code: int,
     code: str,
 ) -> None:
-    def fail(self, media, metadata):
+    def fail(self, media, metadata, geolocation=None):
         assert media.media_id is not None  # media row was already flushed
         raise error
 

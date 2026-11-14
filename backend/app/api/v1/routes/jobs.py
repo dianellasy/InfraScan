@@ -2,11 +2,12 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import JSONResponse
 
 from app.api.dependencies import get_service
 from app.api.errors import error_response
+from app.api.media_urls import RequestMediaUrls
 from app.schemas import APIErrorResponse, DetectionDTO, InferenceJobDTO, Page
 from app.services.contracts import InfraScanService, JobNotFoundError
 
@@ -47,10 +48,11 @@ async def list_jobs(
 )
 async def get_job(
     job_id: UUID,
+    request: Request,
     service: Annotated[InfraScanService, Depends(get_service)],
 ) -> InferenceJobDTO | JSONResponse:
     try:
-        return await service.get_job(job_id)
+        return await service.get_job(job_id, RequestMediaUrls(request))
     except JobNotFoundError:
         return _job_not_found()
 
@@ -62,11 +64,14 @@ async def get_job(
 )
 async def list_job_detections(
     job_id: UUID,
+    request: Request,
     service: Annotated[InfraScanService, Depends(get_service)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> Page[DetectionDTO] | JSONResponse:
     try:
-        return await service.list_job_detections(job_id, page, page_size)
+        return await service.list_job_detections(
+            job_id, page, page_size, RequestMediaUrls(request)
+        )
     except JobNotFoundError:
         return _job_not_found()

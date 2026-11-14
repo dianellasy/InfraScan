@@ -80,6 +80,31 @@ def test_real_inference_returns_v0_contract_and_in_memory_evidence() -> None:
     assert after == output_mtime
 
 
+def test_exif_rotated_upload_is_analyzed_upright() -> None:
+    upright = Image.open(SMOKE_IMAGE).convert("RGB")
+    # Stored rotated 90 deg counterclockwise; EXIF orientation 6 says to
+    # rotate it clockwise for display, which restores the upright image.
+    stored = upright.transpose(Image.Transpose.ROTATE_90)
+    exif = Image.Exif()
+    exif[274] = 6
+    buffer = BytesIO()
+    stored.save(buffer, format="JPEG", quality=95, exif=exif)
+
+    rotated_result, annotated = inference.inference_with_annotation(
+        inference.DEFAULT_WEIGHT_PATH, buffer.getvalue()
+    )
+    upright_result, _ = inference.inference_with_annotation(
+        inference.DEFAULT_WEIGHT_PATH, _jpeg(upright)
+    )
+
+    assert (rotated_result["image_width"], rotated_result["image_height"]) == (886, 595)
+    with Image.open(BytesIO(annotated)) as evidence:
+        assert evidence.size == (886, 595)
+    top_rotated = max(rotated_result["detections"], key=lambda d: d["confidence"])
+    top_upright = max(upright_result["detections"], key=lambda d: d["confidence"])
+    assert top_rotated["bbox_xyxy"] == pytest.approx(top_upright["bbox_xyxy"], abs=4.0)
+
+
 def test_real_inference_on_blank_image_has_zero_detections() -> None:
     blank = _jpeg(Image.new("RGB", (640, 480), color=(128, 128, 128)))
 
@@ -98,6 +123,7 @@ def test_http_to_celery_worker_to_database_with_real_model(
 
     from app.adapters.celery_queue import CeleryInferenceQueue
     from app.api.v1.router import api_router
+    from app.geolocation import LONDON_BRIDGE_POC
     from app.models import InferenceJob
     from app.services.inference_jobs import DatabaseInfraScanService
     from inference.celery import database
@@ -110,7 +136,7 @@ def test_http_to_celery_worker_to_database_with_real_model(
 
     app = FastAPI()
     app.state.infrascan_service = DatabaseInfraScanService(
-        session_factory, CeleryInferenceQueue(celery_app)
+        session_factory, CeleryInferenceQueue(celery_app), poc_geolocation=LONDON_BRIDGE_POC
     )
     app.include_router(api_router, prefix="/api/v1")
     image = _jpeg(Image.open(SMOKE_IMAGE))
@@ -137,17 +163,25 @@ def test_http_to_celery_worker_to_database_with_real_model(
 
                 job = client.get(f"/api/v1/jobs/{job_id}").json()
                 detections = client.get(f"/api/v1/jobs/{job_id}/detections").json()
+                annotated = client.get(job["annotated_image_url"])
     finally:
         database.dispose_engine()
 
     assert job["status"] == "completed"
     assert job["model_version"] == "v0-mvp"
+    assert (job["metadata"]["latitude"], job["metadata"]["longitude"]) == (51.507921, -0.0877)
+    assert job["geolocation"]["mode"] == "poc_assumed"
+    assert annotated.status_code == 200
+    assert annotated.headers["content-type"] == "image/jpeg"
     assert detections["total"] == len(detections["items"]) > 0
     evidence_ids = {d["evidence_media"] for d in detections["items"]}
     assert len(evidence_ids) == 1 and None not in evidence_ids
     for item in detections["items"]:
         assert item["classification"] == CLASS_LABELS[item["issue_type"]]
         assert len(item["bounding_box"]) == 4
+        assert item["location_status"] == "estimated"
+        assert abs(item["latitude"] - 51.507921) < 0.001
+        assert abs(item["longitude"] + 0.0877) < 0.001
 
     # Compare persisted rows with a direct call on the same stored bytes.
     expected, _ = inference.inference_with_annotation(inference.DEFAULT_WEIGHT_PATH, image)
@@ -161,3 +195,28 @@ def test_http_to_celery_worker_to_database_with_real_model(
         with Image.open(BytesIO(stored.evidence_media[0].data)) as evidence:
             assert evidence.format == "JPEG"
             assert evidence.size == Image.open(BytesIO(image)).size
+        assert annotated.content == stored.evidence_media[0].data
+
+
+def test_seed_command_with_real_model_is_repeatable(
+    session_factory: sessionmaker[Session], migrated_engine
+) -> None:
+    from app import seed_poc
+    from app.models import DetectionRecord, InferenceJob
+
+    first = seed_poc.seed(migrated_engine, log=lambda _: None)
+    second = seed_poc.seed(migrated_engine, log=lambda _: None)
+
+    assert first.created and not second.created
+    assert second.job.job_id == first.job.job_id
+    assert second.job.status == "completed"
+    assert second.job.annotated_media_id is not None
+
+    # Detections are the model's output on the submitted JPEG copy.
+    submitted = seed_poc.jpeg_copy(seed_poc.DEFAULT_SOURCE)
+    expected, _ = inference.inference_with_annotation(inference.DEFAULT_WEIGHT_PATH, submitted)
+    assert len(second.detections) == len(expected["detections"]) > 0
+    assert all(d.location_status == "estimated" for d in second.detections)
+    with session_factory() as session:
+        assert session.query(InferenceJob).count() == 1
+        assert session.query(DetectionRecord).count() == len(expected["detections"])

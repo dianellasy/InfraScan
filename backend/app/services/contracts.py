@@ -1,5 +1,6 @@
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Literal, Protocol
 from uuid import UUID
 
 from fastapi import UploadFile
@@ -29,6 +30,30 @@ class SubmissionDependencyUnavailableError(Exception):
 
 class JobNotFoundError(LookupError):
     """No inference job exists for the requested application job ID."""
+
+
+class DetectionNotFoundError(LookupError):
+    """No detection exists for the requested detection ID."""
+
+
+class MediaNotFoundError(LookupError):
+    """No stored media exists for the requested media ID."""
+
+
+MediaKind = Literal["evidence", "input"]
+
+
+@dataclass(frozen=True)
+class MediaContent:
+    media_id: UUID
+    data: bytes
+    content_type: str
+
+
+class MediaUrlBuilder(Protocol):
+    """Builds browser-accessible URLs for stored media (supplied by the API layer)."""
+
+    def media_url(self, kind: MediaKind, media_id: UUID) -> str: ...
 
 
 class InfraScanService(Protocol):
@@ -67,11 +92,19 @@ class InfraScanService(Protocol):
         submitted_before: datetime | None,
     ) -> Page[InferenceJobDTO]: ...
 
-    async def get_job(self, job_id: UUID) -> InferenceJobDTO: ...
+    async def get_job(
+        self, job_id: UUID, urls: MediaUrlBuilder | None = None
+    ) -> InferenceJobDTO: ...
 
     async def list_job_detections(
-        self, job_id: UUID, page: int, page_size: int
+        self,
+        job_id: UUID,
+        page: int,
+        page_size: int,
+        urls: MediaUrlBuilder | None = None,
     ) -> Page[DetectionDTO]: ...
+
+    async def get_media(self, kind: MediaKind, media_id: UUID) -> MediaContent: ...
 
     async def list_roads(
         self,
@@ -108,7 +141,7 @@ class InfraScanService(Protocol):
     async def get_detection(self, detection_id: UUID) -> DetectionDTO: ...
 
     async def get_detection_evidence(
-        self, detection_id: UUID
+        self, detection_id: UUID, urls: MediaUrlBuilder
     ) -> DetectionEvidenceDTO: ...
 
     async def get_analytics_overview(

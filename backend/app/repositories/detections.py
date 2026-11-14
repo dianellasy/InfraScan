@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -17,6 +18,9 @@ class NewDetection:
     confidence: float
     severity: str
     bounding_box: list[float]
+    location: dict[str, float] | None = None
+    location_status: str | None = None
+    location_details: dict[str, Any] | None = None
 
 
 class DetectionRecordRepository:
@@ -38,7 +42,9 @@ class DetectionRecordRepository:
                 confidence=detection.confidence,
                 severity=detection.severity,
                 bounding_box=list(detection.bounding_box),
-                location=None,
+                location=detection.location,
+                location_status=detection.location_status,
+                location_details=detection.location_details,
                 frame_timestamp=None,
                 detected_at=detected_at,
             )
@@ -47,6 +53,9 @@ class DetectionRecordRepository:
         self._session.add_all(records)
         self._session.flush()
         return records
+
+    def get(self, detection_id: UUID) -> DetectionRecord | None:
+        return self._session.get(DetectionRecord, detection_id)
 
     def list_for_job(
         self, job_id: UUID, offset: int, limit: int

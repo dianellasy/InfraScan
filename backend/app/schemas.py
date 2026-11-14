@@ -1,6 +1,6 @@
 import math
 from datetime import UTC, datetime
-from typing import Annotated, Generic, Literal, TypeVar
+from typing import Annotated, Any, Generic, Literal, TypeVar
 from uuid import UUID
 
 from pydantic import (
@@ -75,6 +75,38 @@ class InferenceJobAccepted(BaseModel):
     submitted_at: Annotated[AwareDatetime, AfterValidator(_normalize_utc)]
 
 
+class GeolocationSourceDTO(BaseModel):
+    name: str | None = None
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    datum: str = "WGS84"
+
+
+class JobGeolocationDTO(BaseModel):
+    """How this job's detection coordinates were produced.
+
+    `mode` is `poc_assumed` when the source GPS and camera setup are demo
+    assumptions rather than measurements of the actual capture.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    mode: str
+    assumed: bool
+    note: str | None = None
+    source: GeolocationSourceDTO
+    camera: dict[str, Any]
+    request_gps: dict[str, Any] | None = Field(
+        default=None, description="Client-supplied GPS that was not used."
+    )
+    image: dict[str, Any] | None = Field(
+        default=None, description="Oriented image size the boxes refer to."
+    )
+    intrinsics: dict[str, Any] | None = Field(
+        default=None, description="Pinhole intrinsics used for that image size."
+    )
+
+
 class InferenceJobDTO(InferenceJobAccepted):
     status: str
     submitted_at: datetime
@@ -84,6 +116,11 @@ class InferenceJobDTO(InferenceJobAccepted):
     error: str | None = None
     metadata: InferenceMetadata | None = None
     model_version: str | None = None
+    geolocation: JobGeolocationDTO | None = None
+    annotated_media_id: UUID | None = None
+    annotated_image_url: str | None = Field(
+        default=None, description="Browser URL of the annotated JPEG once completed."
+    )
 
 
 class IssueCreate(BaseModel):
@@ -123,6 +160,22 @@ class DetectionLocation(BaseModel):
     longitude: float = Field(ge=-180, le=180)
 
 
+class DetectionLocationDetails(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    method: str | None = None
+    basis: str | None = Field(
+        default=None, description="`poc_assumed` for demo-assumed camera geolocation."
+    )
+    contact_pixel: list[float] | None = Field(
+        default=None, description="[u, v] bottom-center of the box, oriented image pixels."
+    )
+    east_m: float | None = None
+    north_m: float | None = None
+    ground_distance_m: float | None = None
+    message: str | None = None
+
+
 class DetectionDTO(BaseModel):
     detection_id: UUID
     job_id: UUID
@@ -137,13 +190,23 @@ class DetectionDTO(BaseModel):
     # Provisional: the v0-mvp model class ID, not a permanent issue-type ID.
     issue_type: int | None = None
     evidence_media: UUID | None = None
+    evidence_media_url: str | None = None
     location: DetectionLocation | None = None
+    location_status: str | None = Field(
+        default=None,
+        description=(
+            "`estimated` when `location` is set; otherwise why it is NULL. "
+            "NULL when geolocation was not attempted."
+        ),
+    )
+    location_details: DetectionLocationDetails | None = None
     bounding_box: (
         Annotated[list[float], Field(min_length=4, max_length=4)] | None
     ) = Field(
         default=None,
         description=(
-            "[x1, y1, x2, y2] in pixels of the original prediction source image."
+            "[x1, y1, x2, y2] in pixels of the upright (EXIF-applied) prediction "
+            "source image at its original size."
         ),
     )
     frame_timestamp: float | None = Field(default=None, ge=0)

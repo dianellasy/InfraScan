@@ -51,6 +51,8 @@ and Pydantic DTOs described in the architecture design:
 | `GET` | `/api/v1/detections` |
 | `GET` | `/api/v1/detections/{detection_id}` |
 | `GET` | `/api/v1/detections/{detection_id}/evidence` |
+| `GET` | `/api/v1/media/evidence/{media_id}` |
+| `GET` | `/api/v1/media/inputs/{media_id}` |
 | `GET` | `/api/v1/analytics/overview` |
 | `GET` | `/api/v1/analytics/road-conditions` |
 | `GET` | `/api/v1/analytics/geographic` |
@@ -62,8 +64,10 @@ storage, inference-job persistence, task queuing, and domain repositories are
 declared in `backend/app/adapters/ports.py`. When `DATABASE_URL` is set, the
 app's startup lifespan (`backend/main.py`) attaches the PostgreSQL-backed
 `DatabaseInfraScanService` (`backend/app/services/inference_jobs.py`). It
-implements inference submission, `GET /api/v1/jobs/{job_id}`, and
-`GET /api/v1/jobs/{job_id}/detections`; the other endpoints return
+implements inference submission, `GET /api/v1/jobs/{job_id}`,
+`GET /api/v1/jobs/{job_id}/detections`,
+`GET /api/v1/detections/{detection_id}/evidence`, and the two
+`GET /api/v1/media/...` image endpoints; the other endpoints return
 `501 NOT_IMPLEMENTED`. Without `DATABASE_URL`, no service is attached and API
 calls return `503 Service Unavailable` rather than placeholder data.
 
@@ -152,7 +156,8 @@ and uses `InferenceJobProcessor` (`backend/app/services/inference_processing.py`
    as in `inference_service`. The annotated JPEG is encoded in memory for this
    invocation and is never read from the shared `data/outputs/annotated.jpg`.
 3. In one new transaction, it saves one `EvidenceMedia` row, one
-   `DetectionRecord` per detection (all pointing to that evidence row),
+   `DetectionRecord` per detection (all pointing to that evidence row, with its
+   geolocation result when the job carries POC provenance),
    `model_version`, and `completed`/`completed_at`. A completed job therefore
    always has its saved output. An empty detection list is a successful job with
    zero detection rows (the annotated image is still stored).
@@ -176,9 +181,31 @@ keeps the `page`/`page_size` pagination and returns an empty `items` list for
 completed jobs with no detections. Both return `404` with
 `{"error":{"code":"JOB_NOT_FOUND",...}}` for unknown jobs. Each detection keeps
 the existing fields (`classification` is derived from the stored class ID;
-`latitude`/`longitude` are NULL until detection GPS exists) and adds
-`issue_id`, `issue_type`, `evidence_media`, `location`, `bounding_box`, and
-`frame_timestamp`.
+`latitude`/`longitude` mirror `location` and are NULL when no location was
+computed) and adds `issue_id`, `issue_type`, `evidence_media`, `location`,
+`bounding_box`, and `frame_timestamp`.
+
+Image and geolocation fields (absolute URLs are built from the request's host):
+
+| Response | Field | Meaning |
+| --- | --- | --- |
+| Job | `annotated_media_id`, `annotated_image_url` | The job's own annotated JPEG; set once the job completes, including when it has zero detections |
+| Job | `geolocation` | Provenance of the coordinates: `mode` (`poc_assumed`), `assumed`, `note`, `source` (name, latitude, longitude, datum), `camera` (profile, height, orientation, limits), `request_gps` (what the client sent, `used: false`), `image` (oriented width/height), `intrinsics` (fx, fy, cx, cy at that size). NULL for jobs submitted without POC geolocation |
+| Detection | `evidence_media_url` | URL of the annotated JPEG the detection belongs to |
+| Detection | `location` | `{"latitude", "longitude"}` WGS84 demo estimate, or NULL |
+| Detection | `location_status` | `estimated` when `location` is set; otherwise why it is NULL (see below) |
+| Detection | `location_details` | `method`, `basis`, `contact_pixel` `[u, v]`, `east_m`, `north_m`, `ground_distance_m`, and a `message` when no location was computed |
+
+`GET /api/v1/media/evidence/{media_id}` and `GET /api/v1/media/inputs/{media_id}`
+return the stored image bytes with their stored `Content-Type` (`image/jpeg`),
+`Content-Disposition: inline`, and a private immutable cache header, so an
+`<img src>` can use the URLs directly. Unknown IDs return `404 MEDIA_NOT_FOUND`.
+The bytes always come from the database row for that job; no filesystem path
+is returned and the shared `inference/data/outputs/annotated.jpg` is never read.
+`GET /api/v1/detections/{detection_id}/evidence` returns one frame with
+`original_url`, `annotated_url`, and the bounding box, or
+`404 DETECTION_NOT_FOUND`. Like the rest of the API, these endpoints are not
+authenticated yet.
 
 ### Deferred limitations (post-MVP)
 
@@ -194,8 +221,10 @@ the existing fields (`classification` is derived from the stored class ID;
   `running`) need manual handling.
 - Failed jobs do not store an error message, so `error` in the job DTO stays
   NULL.
-- Detection GPS (`location`) is not calculated yet, and `frame_timestamp` is
-  NULL for still images.
+- Detection GPS (`location`) is calculated only in the
+  [geolocation proof of concept](#geolocation-proof-of-concept), from an
+  assumed source location and camera setup. Without it, `location` is NULL.
+  `frame_timestamp` is NULL for still images.
 
 The controller bounds reads of the uploaded file, but this is not a
 server-wide request-body limit. Production deployment must separately
@@ -219,8 +248,11 @@ declarative `Base` in `backend/app/models/base.py`:
   string with no default until assigned by the service/worker), `created_at`
   (required `TIMESTAMPTZ` defaulting to database `now()`), `started_at` and
   `completed_at` (nullable `TIMESTAMPTZ`), `captured_at` (required
-  `TIMESTAMPTZ`), `latitude` (required `NUMERIC` in `[-90, 90]`), and
-  `longitude` (required `NUMERIC` in `[-180, 180]`).
+  `TIMESTAMPTZ`), `latitude` (required `NUMERIC` in `[-90, 90]`),
+  `longitude` (required `NUMERIC` in `[-180, 180]`), and `geolocation`
+  (nullable `JSONB` provenance; see the job `geolocation` field above). In POC
+  mode `latitude`/`longitude` hold the effective (assumed) source GPS, and the
+  client's values are kept in `geolocation.request_gps`.
 - `EvidenceMedia` (`evidence_media`): stores the annotated evidence JPEG,
   separate from the input. Columns are `media_id` (UUID primary key), `job_id`
   (required, indexed foreign key to `inference_jobs`), `data` (`BYTEA`),
@@ -231,8 +263,12 @@ declarative `Base` in `backend/app/models/base.py`:
   foreign key to `inference_jobs`, so one job has zero or more detections);
   `issue_id` (nullable UUID, NULL for now); and `issue_type` (required integer).
   `evidence_media` is a nullable foreign key to `evidence_media.media_id`.
-  `location` is nullable `JSONB` (`{"latitude": ..., "longitude": ...}`, NULL
-  for now). `confidence` is a required double in `[0, 1]`. `severity` is
+  `location` is nullable `JSONB` (`{"latitude": ..., "longitude": ...}`).
+  `location_status` is a nullable string restricted to the projection statuses
+  (`estimated`, `above_horizon`, `behind_camera`, `unstable_near_horizon`,
+  `outside_image`, `nonfinite`, `undistortion_failed`, `intrinsics_mismatch`),
+  and `location_details` is nullable `JSONB`. All three are NULL when no
+  geolocation was attempted. `confidence` is a required double in `[0, 1]`. `severity` is
   required and must be `minor`, `moderate`, or `critical`. `bounding_box` is a
   required `JSONB` array of four numbers. `frame_timestamp` is a nullable
   nonnegative offset in seconds, NULL for still images. `detected_at` is a
@@ -249,10 +285,11 @@ references are declared. A later issue-types migration must define the mapping
 from class IDs and convert stored values.
 
 **Bounding boxes:** `bounding_box` is `[x1, y1, x2, y2]` in fractional pixels of
-the image the model received, at its original dimensions. It is not a
-normalized YOLO training coordinate and is not on a fixed 640×640 grid. The
-pipeline does not apply EXIF orientation, so coordinates refer to the stored
-pixel grid.
+the upright image, at its original dimensions. It is not a normalized YOLO
+training coordinate and is not on a fixed 640×640 grid. The pipeline applies
+the JPEG's EXIF orientation before inference, so boxes, the annotated image,
+and the geolocation intrinsics all use the same oriented width and height. For
+EXIF-rotated uploads this grid differs from the raw stored pixel grid.
 
 **API timestamp mapping (`created_at` <-> `submitted_at`):** The public HTTP
 contract (`InferenceJobAccepted`, `InferenceJobDTO`, and the `submitted_after` /
@@ -333,7 +370,8 @@ applying**:
 | Revision | Creates |
 | --- | --- |
 | `7c4e9a1b2d01` | `input_media`, `inference_jobs` |
-| `9e2b6d4f1a37` (head) | `evidence_media`, `detection_records` |
+| `9e2b6d4f1a37` | `evidence_media`, `detection_records` |
+| `c3f8a2d6e915` (head) | `inference_jobs.geolocation`, `detection_records.location_status` (with check), `detection_records.location_details` |
 
 ### Running the inference workflow
 
@@ -356,6 +394,7 @@ environment additionally needs `ultralytics`/`torch`, as in
 cd backend
 export DATABASE_URL="postgresql://infrascan:infrascan_dev@localhost:5432/infrascan"
 export CELERY_BROKER_URL="amqp://infrascan:infrascan_dev@localhost:5672//"
+export INFRASCAN_POC_GEOLOCATION=1                      # optional demo mode, read by the API
 alembic upgrade head
 uvicorn main:app --reload                               # API
 celery -A inference.celery worker --loglevel=info       # worker, separate shell
@@ -375,6 +414,121 @@ The model CLI smoke check now runs as a module from `backend/` because
 `service.py` imports `inference.labels`:
 `python -m inference.service`.
 
+### Geolocation proof of concept
+
+This demo shows the full detection-to-coordinates path before real device
+metadata is supported. **Every coordinate it produces is a demo estimate from
+assumed inputs.** The seed image `inference/data/uploads/multi.png` is treated
+as though it were captured at London Bridge, so its coordinates do not establish
+where the photo was actually taken.
+
+**Switch.** `INFRASCAN_POC_GEOLOCATION` is read by the API at startup (`1`,
+`true`, `yes`, `on` enable it; `0`, `false`, `no`, `off`, or unset disable it;
+anything else fails startup). `compose.yaml` enables it for the `api` service by
+default; run `INFRASCAN_POC_GEOLOCATION=0 docker compose up` to turn it off.
+While it is enabled, the API logs a warning, and every accepted submission:
+
+- still goes through the normal validation and returns `202` with a job ID;
+- is stored with the London Bridge source GPS as the job's
+  `latitude`/`longitude`, regardless of the request metadata or any EXIF GPS
+  (the request values are kept in `geolocation.request_gps` with
+  `used: false`);
+- stores the full camera setup as `geolocation` provenance. The worker
+  geolocates from that persisted provenance, not from its own environment, so
+  results do not depend on how the worker was configured.
+
+The real detector runs on every submission. Jobs submitted with the switch off
+keep the request GPS and get no detection locations.
+
+**Configuration** (`backend/app/geolocation/poc.py`, `LONDON_BRIDGE_POC`):
+
+| Setting | Value |
+| --- | --- |
+| Source | London Bridge, London, UK, 51.507921, -0.087700 (WGS84) |
+| Camera | Samsung Galaxy Z Flip7 rear main camera at 1×, 1.5 m above a flat road |
+| Orientation (assumed, not measured) | heading 0° (clockwise from true north), pitch 20° down, roll 0° |
+| Contact point | bottom center of each bounding box |
+| Stable range | ground distance ≤ 50 m and ray ≥ 1° below horizontal |
+
+No measured Flip7 calibration exists in this repository, so the profile is
+`GALAXY_Z_FLIP7_MAIN_1X_ESTIMATED` (`kind: diagonal_fov_estimate`,
+`calibrated: false`). It treats the published 85° field of view as diagonal
+and assumes square pixels, a centered principal point, zero distortion, and an
+uncropped image. For an image of `w × h` oriented pixels:
+
+\[ f = \frac{\sqrt{w^2 + h^2}}{2\tan(42.5^\circ)},\quad f_x = f_y = f,\quad c_x = w/2,\quad c_y = h/2 \]
+
+The intrinsics are evaluated at the oriented size of each analyzed image (the
+same grid as its bounding boxes; the model's 640 letterbox grid is never used),
+so resized uploads give the same ground positions. To use a real calibration,
+build a `CalibratedProfile` with a `PinholeIntrinsics` (fx, fy, cx, cy, the
+calibration width and height, and OpenCV `(k1, k2, p1, p2[, k3])`
+coefficients) and pass it as the `profile` of a `CameraSetup`. It is scaled
+uniformly to each image, and images with a different aspect ratio (crops or
+rotations) get `intrinsics_mismatch` rather than a guessed location.
+
+**Method** (`backend/app/geolocation/`): undistort the contact pixel if the
+profile has real coefficients, back-project it through the intrinsic matrix,
+rotate the ray into a local east-north-up frame using the orientation,
+intersect it with the road plane 1.5 m below the camera, and convert the
+east/north offset to WGS84 using the ellipsoid's meridional and prime-vertical
+radii. The module docstring in `projection.py` defines the axes, units, and
+signs. A projection that cannot be trusted keeps the detection, sets
+`location` to NULL, and records why in `location_status`; it never produces a
+fabricated coordinate or fails the job:
+
+| `location_status` | Meaning |
+| --- | --- |
+| `estimated` | `location` is set |
+| `above_horizon` | the ray points at or above the horizon |
+| `behind_camera` | the plane intersection lies behind the camera |
+| `unstable_near_horizon` | the intersection is beyond 50 m or less than 1° below horizontal, where small pixel errors cause large distance errors |
+| `outside_image` | the contact point is outside the image |
+| `nonfinite` | an input or intermediate value is not finite |
+| `undistortion_failed` | undistortion did not converge |
+| `intrinsics_mismatch` | calibrated intrinsics cannot map onto this image's dimensions |
+
+**Seed command.** From `backend/`, with `DATABASE_URL` set and the schema at
+head:
+
+```bash
+INFRASCAN_POC_GEOLOCATION=1 python -m app.seed_poc               # runs the model in this process
+INFRASCAN_POC_GEOLOCATION=1 python -m app.seed_poc --via-worker  # publishes to Celery and waits
+```
+
+With Docker Compose, use the worker image (it has the model dependencies):
+`docker compose run --rm -e INFRASCAN_POC_GEOLOCATION=1 worker python -m app.seed_poc`.
+
+The command converts a temporary copy of `multi.png` to JPEG (quality 95; the
+original file is not modified), submits it through the same service path as
+`POST /api/v1/inference/jobs`, runs the real v0-mvp model, and prints the job
+ID, each detection with its demo coordinates, and the job, detections,
+annotated image, and frontend URLs. It is repeatable: it takes a PostgreSQL
+advisory lock and reuses an existing completed (or still running/pending) seed
+job identified by its reserved filename and exact JPEG bytes, so later runs
+create no new records. Only a history of failed seed jobs triggers a new
+submission. The detection count comes from the submitted JPEG bytes and can
+differ slightly from the PNG test fixture (four boxes instead of five, because
+one borderline box falls below the confidence threshold after re-encoding).
+Options: `--source PATH`, `--timeout SECONDS`, and `--api-base-url` /
+`--frontend-url` (or `INFRASCAN_PUBLIC_API_URL` / `INFRASCAN_FRONTEND_URL`) for
+the printed links.
+
+**Running the demo:**
+
+1. Start PostgreSQL and RabbitMQ, apply migrations, and start the API (with
+   `INFRASCAN_POC_GEOLOCATION=1`) and the worker, as in
+   [Running the inference workflow](#running-the-inference-workflow).
+2. Run the seed command above and note the printed job ID.
+3. Start the frontend: `cd "frontend/InfraScan frontend" && npm install && npm run dev`.
+   It calls `VITE_API_BASE_URL` (default `http://127.0.0.1:8000`), and the API
+   allows CORS from `http://localhost:5173`.
+4. Open `http://localhost:5173/?job=<job_id>` (the seed prints this link). The
+   page polls the job until it finishes, then shows the annotated image and,
+   for each detection, the classification, confidence, severity, and the GPS
+   labeled as a demo estimate. You can also upload a JPEG from the page; the
+   GPS fields are sent but ignored while the demo mode is on.
+
 ### Backend tests
 
 Run from `backend/`:
@@ -391,6 +545,13 @@ on `inference/data/uploads/multi.png`. `tests/test_real_model_pipeline.py` runs
 the shipped weights. It covers HTTP submission, a Celery worker on an in-memory
 broker, YOLO, PostgreSQL, and the tracking endpoints. It runs only when
 `ultralytics` is importable and is skipped otherwise.
+
+`tests/test_geolocation.py` checks the projection math without a database:
+known ground points round-trip through pixel space, heading changes rotate the
+results, image scaling leaves them unchanged, and rays at or above the horizon
+get no coordinate. `tests/test_poc_geolocation_workflow.py` covers the POC
+override of request GPS, persisted and returned locations, per-job media
+(including zero-detection jobs), the evidence endpoint, and seed idempotency.
 
 ## Possible Model Evaluation Metric for Model
 - mAP50-95
@@ -446,7 +607,8 @@ database volume, run `docker compose down --volumes`.
 
 - current state:
 	- prototype have worked
-    - need to wire up with the rest project
+    - wired into the inference pipeline as a demo with an assumed source and camera
+      (see [Geolocation proof of concept](#geolocation-proof-of-concept))
     - need extensive testing though
     - Need to find top 2-3 most popular dashcams from India and America and provide support
        - for now, just pick one from each side and provide meta data parsing and extraction 

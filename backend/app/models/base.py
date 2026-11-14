@@ -1,4 +1,5 @@
-from sqlalchemy import MetaData
+from sqlalchemy import JSON, MetaData
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase
 
 NAMING_CONVENTION: dict[str, str] = {
@@ -20,3 +21,8 @@ class Base(DeclarativeBase):
     """
 
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
+
+
+def jsonb_type() -> JSON:
+    # Persist Python None as SQL NULL rather than the JSON literal `null`.
+    return JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql")

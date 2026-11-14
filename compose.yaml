@@ -37,6 +37,9 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-infrascan}:${POSTGRES_PASSWORD:-infrascan_dev}@db:5432/${POSTGRES_DB:-infrascan}
       CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-infrascan}:${RABBITMQ_PASSWORD:-infrascan_dev}@rabbitmq:5672//
       CELERY_RESULT_BACKEND: db+postgresql+psycopg://${POSTGRES_USER:-infrascan}:${POSTGRES_PASSWORD:-infrascan_dev}@db:5432/${POSTGRES_DB:-infrascan}
+      # Development demo: treat every submission as captured at London Bridge
+      # with the sample camera setup (see README "Geolocation proof of concept").
+      INFRASCAN_POC_GEOLOCATION: ${INFRASCAN_POC_GEOLOCATION:-1}
     ports:
       - "8000:8000"
     depends_on:

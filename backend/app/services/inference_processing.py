@@ -3,13 +3,14 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.geolocation import CameraSetup, GroundPlaneGeolocator
 from app.models import DETECTION_SEVERITIES, InferenceJobStatus
 from app.repositories import (
     DetectionRecordRepository,
@@ -34,6 +35,18 @@ class InferenceOutputError(ValueError):
 class ParsedInference:
     model_version: str
     detections: list[NewDetection]
+    # Oriented (EXIF-applied) size of the image the boxes refer to.
+    image_width: int
+    image_height: int
+
+
+@dataclass(frozen=True)
+class ClaimedJob:
+    image: bytes
+    filename: str | None
+    source_latitude: float
+    source_longitude: float
+    geolocation: dict[str, Any] | None
 
 
 def _utc_now() -> datetime:
@@ -53,6 +66,13 @@ def parse_inference_output(result: Mapping[str, Any]) -> ParsedInference:
     model_version = result.get("model_version")
     if not isinstance(model_version, str) or not model_version:
         raise InferenceOutputError("model_version must be a nonempty string")
+
+    dimensions = []
+    for name in ("image_width", "image_height"):
+        value = result.get(name)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise InferenceOutputError(f"{name} must be a positive int")
+        dimensions.append(value)
 
     detections = []
     for index, item in enumerate(result.get("detections") or ()):
@@ -83,17 +103,72 @@ def parse_inference_output(result: Mapping[str, Any]) -> ParsedInference:
                 ],
             )
         )
-    return ParsedInference(model_version=model_version, detections=detections)
+    return ParsedInference(
+        model_version=model_version,
+        detections=detections,
+        image_width=dimensions[0],
+        image_height=dimensions[1],
+    )
+
+
+def geolocate_detections(
+    parsed: ParsedInference, job: ClaimedJob
+) -> tuple[list[NewDetection], dict[str, Any] | None]:
+    """Attach per-detection locations using the job's persisted camera setup.
+
+    Returns the detections and the job's provenance completed with the image
+    size and intrinsics actually used. Jobs without provenance are returned
+    unchanged (geolocation not attempted). Invalid projections keep the
+    detection with a NULL location and an explanatory status.
+    """
+    if job.geolocation is None:
+        return parsed.detections, None
+
+    setup = CameraSetup.from_dict(job.geolocation["camera"])
+    geolocator = GroundPlaneGeolocator(
+        setup,
+        job.source_latitude,
+        job.source_longitude,
+        parsed.image_width,
+        parsed.image_height,
+        basis=job.geolocation.get("mode"),
+    )
+    detections = []
+    for detection in parsed.detections:
+        result = geolocator.locate(detection.bounding_box)
+        detections.append(
+            replace(
+                detection,
+                location=result.location,
+                location_status=result.status.value,
+                location_details=result.details,
+            )
+        )
+
+    provenance = {
+        **job.geolocation,
+        "image": {
+            "width": parsed.image_width,
+            "height": parsed.image_height,
+            "exif_orientation_applied": True,
+        },
+        "intrinsics": (
+            geolocator.intrinsics.as_dict() if geolocator.intrinsics is not None else None
+        ),
+    }
+    if geolocator.intrinsics_error is not None:
+        provenance["intrinsics_error"] = geolocator.intrinsics_error
+    return detections, provenance
 
 
 class InferenceJobProcessor:
     """Runs one persisted inference job end to end.
 
     Three short transactions: claim the pending job (mark it running), then
-    run inference with no session open, then save the evidence image, all
-    detections, and the completed status together. Ordinary failures mark the
-    job failed. Retries, duplicate-delivery guarantees, and recovery of
-    stranded jobs are deferred until after the MVP.
+    run inference and geolocation with no session open, then save the
+    evidence image, all detections, and the completed status together.
+    Ordinary failures mark the job failed. Retries, duplicate-delivery
+    guarantees, and recovery of stranded jobs are deferred until after the MVP.
     """
 
     def __init__(
@@ -115,19 +190,20 @@ class InferenceJobProcessor:
             raise
         if claimed is None:
             return None
-        image, filename = claimed
 
         try:
-            result, annotated_jpeg = self._run_inference(image, filename)
+            result, annotated_jpeg = self._run_inference(claimed.image, claimed.filename)
             detected_at = self._clock()
             parsed = parse_inference_output(result)
+            detections, geolocation = geolocate_detections(parsed, claimed)
+            parsed = replace(parsed, detections=detections)
         except Exception:
             logger.exception("Inference failed for job %s", job_id)
             self._mark_failed(job_id)
             return InferenceJobStatus.FAILED
 
         try:
-            self._save_results(job_id, parsed, annotated_jpeg, detected_at)
+            self._save_results(job_id, parsed, annotated_jpeg, detected_at, geolocation)
         except Exception:
             logger.exception("Could not save inference results for job %s", job_id)
             self._mark_failed(job_id)
@@ -140,7 +216,7 @@ class InferenceJobProcessor:
         )
         return InferenceJobStatus.COMPLETED
 
-    def _claim(self, job_id: UUID) -> tuple[bytes, str | None] | None:
+    def _claim(self, job_id: UUID) -> ClaimedJob | None:
         with self._session_factory() as session, session.begin():
             jobs = InferenceJobRepository(session)
             job = jobs.get_for_update(job_id)
@@ -153,7 +229,13 @@ class InferenceJobProcessor:
                 )
                 return None
             jobs.mark_running(job, started_at=self._clock())
-            return job.input_media.data, job.input_media.filename
+            return ClaimedJob(
+                image=job.input_media.data,
+                filename=job.input_media.filename,
+                source_latitude=float(job.latitude),
+                source_longitude=float(job.longitude),
+                geolocation=job.geolocation,
+            )
 
     def _save_results(
         self,
@@ -161,6 +243,7 @@ class InferenceJobProcessor:
         parsed: ParsedInference,
         annotated_jpeg: bytes,
         detected_at: datetime,
+        geolocation: dict[str, Any] | None,
     ) -> None:
         with self._session_factory() as session, session.begin():
             jobs = InferenceJobRepository(session)
@@ -176,7 +259,12 @@ class InferenceJobProcessor:
             DetectionRecordRepository(session).add_many(
                 job_id, evidence, parsed.detections, detected_at
             )
-            jobs.mark_completed(job, parsed.model_version, completed_at=self._clock())
+            jobs.mark_completed(
+                job,
+                parsed.model_version,
+                completed_at=self._clock(),
+                geolocation=geolocation,
+            )
 
     def _mark_failed(self, job_id: UUID) -> None:
         try:

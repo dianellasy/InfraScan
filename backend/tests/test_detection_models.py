@@ -39,6 +39,8 @@ def test_detection_record_columns_and_nullability() -> None:
         "issue_type",
         "evidence_media",
         "location",
+        "location_status",
+        "location_details",
         "confidence",
         "severity",
         "bounding_box",
@@ -48,7 +50,14 @@ def test_detection_record_columns_and_nullability() -> None:
     assert table.c.detection_id.primary_key is True
 
     required = {"job_id", "issue_type", "confidence", "severity", "bounding_box", "detected_at"}
-    nullable = {"issue_id", "evidence_media", "location", "frame_timestamp"}
+    nullable = {
+        "issue_id",
+        "evidence_media",
+        "location",
+        "location_status",
+        "location_details",
+        "frame_timestamp",
+    }
     for name in required:
         assert table.c[name].nullable is False, name
     for name in nullable:
@@ -58,7 +67,7 @@ def test_detection_record_columns_and_nullability() -> None:
     assert isinstance(table.c.issue_type.type, sa.Integer)
     assert isinstance(table.c.confidence.type, sa.Double)
     assert isinstance(table.c.frame_timestamp.type, sa.Double)
-    for name in ("bounding_box", "location"):
+    for name in ("bounding_box", "location", "location_details"):
         assert isinstance(table.c[name].type.dialect_impl(pg), postgresql.JSONB)
         assert table.c[name].type.none_as_null is True
     assert table.c.detected_at.type.timezone is True
@@ -89,6 +98,7 @@ def test_detection_record_foreign_keys_and_deferred_issue_references() -> None:
         "ck_detection_records_frame_timestamp_nonnegative",
         "ck_detection_records_bounding_box_xyxy",
         "ck_detection_records_location_lat_lon",
+        "ck_detection_records_location_status_allowed",
     }
     assert DETECTION_SEVERITIES == ("minor", "moderate", "critical")
 
@@ -260,6 +270,7 @@ def test_required_detection_fields(
         {"location": {"latitude": 91, "longitude": 0}},
         {"location": {"latitude": 0, "longitude": "east"}},
         {"location": [33.9, -117.9]},
+        {"location_status": "guessed"},
         {"frame_timestamp": -0.5},
     ],
 )
@@ -308,15 +319,26 @@ def test_deleting_job_with_detections_is_restricted(
 
 
 def test_downgrade_one_revision_keeps_initial_tables(disposable_postgres_url: str) -> None:
-    up = run_alembic("upgrade", "head", database_url=disposable_postgres_url)
-    assert up.returncode == 0, up.stderr
-    down = run_alembic("downgrade", "-1", database_url=disposable_postgres_url)
-    assert down.returncode == 0, down.stderr
-
     engine = sa.create_engine(
         disposable_postgres_url.replace("postgresql://", "postgresql+psycopg://", 1)
     )
+
+    def columns(table: str) -> set[str]:
+        return {c["name"] for c in sa.inspect(engine).get_columns(table)}
+
     try:
+        up = run_alembic("upgrade", "head", database_url=disposable_postgres_url)
+        assert up.returncode == 0, up.stderr
+
+        # The geolocation revision only removes its own columns.
+        down = run_alembic("downgrade", "-1", database_url=disposable_postgres_url)
+        assert down.returncode == 0, down.stderr
+        assert "geolocation" not in columns("inference_jobs")
+        assert not {"location_status", "location_details"} & columns("detection_records")
+        assert "location" in columns("detection_records")
+
+        down = run_alembic("downgrade", "7c4e9a1b2d01", database_url=disposable_postgres_url)
+        assert down.returncode == 0, down.stderr
         tables = set(sa.inspect(engine).get_table_names())
     finally:
         engine.dispose()

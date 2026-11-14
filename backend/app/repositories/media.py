@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import EvidenceMedia, InputMedia
@@ -19,6 +20,9 @@ class InputMediaRepository:
         self._session.flush()
         return media
 
+    def get(self, media_id: UUID) -> InputMedia | None:
+        return self._session.get(InputMedia, media_id)
+
 
 class EvidenceMediaRepository:
     def __init__(self, session: Session) -> None:
@@ -33,3 +37,15 @@ class EvidenceMediaRepository:
         self._session.add(evidence)
         self._session.flush()
         return evidence
+
+    def get(self, media_id: UUID) -> EvidenceMedia | None:
+        return self._session.get(EvidenceMedia, media_id)
+
+    def id_for_job(self, job_id: UUID) -> UUID | None:
+        """The job's annotated image ID, without loading the image bytes."""
+        return self._session.scalar(
+            select(EvidenceMedia.media_id)
+            .where(EvidenceMedia.job_id == job_id)
+            .order_by(EvidenceMedia.media_id)
+            .limit(1)
+        )

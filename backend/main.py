@@ -10,6 +10,7 @@ from app.adapters.celery_queue import CeleryInferenceQueue
 from app.api.errors import register_exception_handlers
 from app.api.v1.router import api_router
 from app.db import create_db_engine, create_session_factory
+from app.geolocation import POC_GEOLOCATION_ENV, configured_poc_geolocation
 from app.services.inference_jobs import DatabaseInfraScanService
 from inference.celery.celery_app import celery_app
 
@@ -24,9 +25,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
         return
 
+    poc_geolocation = configured_poc_geolocation()
+    if poc_geolocation is not None:
+        logger.warning(
+            "%s is enabled: every submission uses the assumed %s source GPS and "
+            "sample camera setup; request GPS is ignored",
+            POC_GEOLOCATION_ENV,
+            poc_geolocation.source.name,
+        )
     engine = create_db_engine()
     app.state.infrascan_service = DatabaseInfraScanService(
-        create_session_factory(engine), CeleryInferenceQueue(celery_app)
+        create_session_factory(engine),
+        CeleryInferenceQueue(celery_app),
+        poc_geolocation=poc_geolocation,
     )
     try:
         yield

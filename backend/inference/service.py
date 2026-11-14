@@ -5,7 +5,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageOps
 from ultralytics import YOLO
 
 from inference.labels import CLASS_LABELS, class_label
@@ -119,12 +119,18 @@ def inspect_model(model):
 
 
 def _as_predict_source(image_input, filename=None):
-    """Accept a filesystem path or raw image bytes; return a pre-processed PIL image."""
+    """Accept a filesystem path or raw image bytes; return a pre-processed PIL image.
+
+    EXIF orientation is applied first, so the model, its boxes, the annotated
+    image, and `image_width`/`image_height` all use the upright pixel grid
+    (the same oriented size the submission controller validates). YOLO
+    letterboxes internally but returns boxes in this grid, not its 640 grid.
+    """
     if isinstance(image_input, (bytes, bytearray)):
         image = Image.open(BytesIO(image_input))
     else:
         image = Image.open(image_input)
-    image = preprocess_image(image)
+    image = preprocess_image(ImageOps.exif_transpose(image))
     if filename:
         image.filename = filename
     return image

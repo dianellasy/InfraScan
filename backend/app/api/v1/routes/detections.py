@@ -2,11 +2,14 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi.responses import JSONResponse
 
 from app.api.dependencies import get_service
-from app.schemas import DetectionDTO, DetectionEvidenceDTO, Page
-from app.services.contracts import InfraScanService
+from app.api.errors import error_response
+from app.api.media_urls import RequestMediaUrls
+from app.schemas import APIErrorResponse, DetectionDTO, DetectionEvidenceDTO, Page
+from app.services.contracts import DetectionNotFoundError, InfraScanService
 
 router = APIRouter(prefix="/detections", tags=["detections"])
 
@@ -51,9 +54,24 @@ async def get_detection(
     return await service.get_detection(detection_id)
 
 
-@router.get("/{detection_id}/evidence", response_model=DetectionEvidenceDTO)
+@router.get(
+    "/{detection_id}/evidence",
+    response_model=DetectionEvidenceDTO,
+    responses={404: {"model": APIErrorResponse, "description": "Unknown detection"}},
+)
 async def get_detection_evidence(
     detection_id: UUID,
+    request: Request,
     service: Annotated[InfraScanService, Depends(get_service)],
-) -> DetectionEvidenceDTO:
-    return await service.get_detection_evidence(detection_id)
+) -> DetectionEvidenceDTO | JSONResponse:
+    try:
+        return await service.get_detection_evidence(
+            detection_id, RequestMediaUrls(request)
+        )
+    except DetectionNotFoundError:
+        return error_response(
+            status.HTTP_404_NOT_FOUND,
+            "DETECTION_NOT_FOUND",
+            "The detection was not found.",
+            "detection_id",
+        )

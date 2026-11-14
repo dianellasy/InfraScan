@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import exists, select, update
@@ -19,8 +20,12 @@ class InferenceJobRepository:
         self._session = session
 
     def create_pending(
-        self, media: StoredMedia, metadata: InferenceSubmissionMetadata
+        self,
+        media: StoredMedia,
+        metadata: InferenceSubmissionMetadata,
+        geolocation: dict[str, Any] | None = None,
     ) -> InferenceJob:
+        """`metadata` carries the effective source GPS to persist."""
         job = InferenceJob(
             input_media_id=media.media_id,
             status=InferenceJobStatus.PENDING.value,
@@ -29,6 +34,7 @@ class InferenceJobRepository:
             # instead of the binary float expansion.
             latitude=Decimal(str(metadata.latitude)),
             longitude=Decimal(str(metadata.longitude)),
+            geolocation=geolocation,
         )
         self._session.add(job)
         self._session.flush()
@@ -55,11 +61,18 @@ class InferenceJobRepository:
         job.started_at = started_at
 
     def mark_completed(
-        self, job: InferenceJob, model_version: str, completed_at: datetime
+        self,
+        job: InferenceJob,
+        model_version: str,
+        completed_at: datetime,
+        geolocation: dict[str, Any] | None = None,
     ) -> None:
         job.status = InferenceJobStatus.COMPLETED.value
         job.model_version = model_version
         job.completed_at = completed_at
+        if geolocation is not None:
+            # Assign a new dict; in-place JSON mutation is not change-tracked.
+            job.geolocation = geolocation
 
     def mark_failed(self, job_id: UUID) -> bool:
         """Fail a job that has not finished. Returns whether a row changed."""

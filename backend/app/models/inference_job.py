@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
@@ -18,7 +18,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base
+from app.models.base import Base, jsonb_type
 
 if TYPE_CHECKING:
     from app.models.detection_record import DetectionRecord
@@ -48,6 +48,14 @@ class InferenceJob(Base):
     `submitted_after` / `submitted_before`). Persistence stores this column as
     `created_at`. Future service and repository implementations MUST map
     `InferenceJob.created_at` <-> `submitted_at` to preserve the API contract.
+
+    `latitude`/`longitude` are the effective source GPS used for detection
+    geolocation. In POC geolocation mode they are the assumed London Bridge
+    source, not the client-supplied values. `geolocation` is NULL when no
+    camera setup applies; otherwise it records the mode, source, camera
+    profile, orientation, the ignored request GPS, and (after processing) the
+    oriented image size and intrinsics used, so the calculation can be
+    explained and reproduced.
     """
 
     __tablename__ = "inference_jobs"
@@ -119,6 +127,10 @@ class InferenceJob(Base):
     longitude: Mapped[Decimal] = mapped_column(
         Numeric(),
         nullable=False,
+    )
+    geolocation: Mapped[dict[str, Any] | None] = mapped_column(
+        jsonb_type(),
+        nullable=True,
     )
 
     input_media: Mapped[InputMedia] = relationship(
