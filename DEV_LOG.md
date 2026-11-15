@@ -98,3 +98,12 @@ to represent the annotated frame from the inference
     - upon successful inference, postgres create an evidence_media entity populated with annotated frame w/ detection details and mark inference_job status as completed
 
 IMPORTANT NOTE: Last thing for the inference pipeline is to include geolocation module (will do tmr) and create support for video. Geolocation module will be a proof of concept still. We are using flat road and no device tilt which does not fully reflect practical conditions. Once team has checked and verified progress. We will begin optimizing system and implementing edge case handling.
+
+
+## 8. Geolocation module update
+Current pipeline now include geolocation results. Next will work on video support. ideas on how frontend can grab metadata to make geolocation more accurate:
+- use exifreader or exifr and regex to parse camera model
+- assume reasonable downward tilt for dashcams
+- send camera model as a part of metadata
+- the backend will store a small table of camera/devices and their intrincisc
+- and we can allow users to enter the details themselves

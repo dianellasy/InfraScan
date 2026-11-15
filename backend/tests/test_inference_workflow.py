@@ -310,13 +310,10 @@ def test_worker_persists_detections_with_shared_evidence_and_exact_values(
             assert record.bounding_box == detection["bbox_xyxy"]
             assert record.evidence_media == evidence.media_id
             assert record.issue_id is None
-            if detection["bbox_xyxy"][3] > v0_output["image_height"] / 2:
-                # This fixture's one below-horizon box is ahead and right of
-                # the sample north-facing camera; capture GPS remains on job.
-                assert record.location["latitude"] > float(job.latitude)
-                assert record.location["longitude"] > float(job.longitude)
-            else:
-                assert record.location is None
+            # The sample camera's downward pitch puts every fixture box below
+            # its geometric horizon and within the configured 100 m range.
+            assert record.location is not None
+            assert record.location["latitude"] > float(job.latitude)
             assert record.frame_timestamp is None
             assert record.detected_at == detected_at
 
@@ -551,8 +548,9 @@ def test_end_to_end_submit_process_and_track(
     assert first["bounding_box"] == top["bbox_xyxy"]
     assert first["evidence_media"] is not None
     assert first["issue_id"] is None
-    assert first["location"] is None
-    assert first["latitude"] is None and first["longitude"] is None
+    assert first["location"] is not None
+    assert first["latitude"] == first["location"]["latitude"]
+    assert first["longitude"] == first["location"]["longitude"]
     assert first["frame_timestamp"] is None
     assert first["road_id"] is None
     # TIMESTAMPTZ is read back in the server's zone; the API normalizes to UTC.

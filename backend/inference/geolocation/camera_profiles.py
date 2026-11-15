@@ -47,7 +47,7 @@ class CameraProfile:
 # SYNTHETIC example values, not a calibration of the Galaxy Flip or any device.
 # Replace these with measured values before testing geolocation accuracy.
 SAMPLE_CAMERA_PROFILE = CameraProfile(
-    name="synthetic-level-camera-v1",
+    name="synthetic-dashcam-v1",
     image_width=4032,
     image_height=3024,
     fx_px=3000.0,
@@ -55,6 +55,9 @@ SAMPLE_CAMERA_PROFILE = CameraProfile(
     cx_px=2016.0,
     cy_px=1512.0,
     height_m=1.5,
+    # A modest downward dashcam mount moves the road horizon above image
+    # center, allowing distant road detections to intersect the ground plane.
+    pitch_down_deg=15.0,
 )
 
 # The submission API has no heading yet. Every prototype capture is assumed

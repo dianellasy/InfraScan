@@ -195,7 +195,7 @@ Edit `backend/inference/geolocation/camera_profiles.py` to configure the test:
 
 - `SAMPLE_CAMERA_PROFILE`: synthetic 4032 × 3024 calibration, `fx=fy=3000` pixels,
   principal point `(2016, 1512)`, camera height `1.5` meters above the road,
-  pitch `0` degrees, maximum ground distance `100` meters.
+  pitch `15` degrees downward, maximum ground distance `100` meters.
 - `PROTOTYPE_HEADING_DEG`: fixed heading clockwise from true north, currently
   `0` (north). All jobs use this assumption until per-capture heading is added.
   This is unrelated to the EXIF Orientation rotation flag.
