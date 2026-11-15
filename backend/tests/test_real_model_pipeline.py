@@ -89,6 +89,17 @@ def test_real_inference_on_blank_image_has_zero_detections() -> None:
     assert annotated.startswith(b"\xff\xd8")
 
 
+def test_prediction_source_applies_exif_orientation() -> None:
+    image = Image.new("RGB", (800, 600))
+    exif = Image.Exif()
+    exif[274] = 6  # Stored landscape pixels displayed 90 degrees clockwise.
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG", exif=exif)
+    source = inference._as_predict_source(buffer.getvalue())
+    assert source.size == (600, 800)
+    assert source.getexif().get(274, 1) == 1
+
+
 def test_http_to_celery_worker_to_database_with_real_model(
     session_factory: sessionmaker[Session],
     migrated_engine,
@@ -145,9 +156,13 @@ def test_http_to_celery_worker_to_database_with_real_model(
     assert detections["total"] == len(detections["items"]) > 0
     evidence_ids = {d["evidence_media"] for d in detections["items"]}
     assert len(evidence_ids) == 1 and None not in evidence_ids
+    assert any(d["location"] is not None for d in detections["items"])
     for item in detections["items"]:
         assert item["classification"] == CLASS_LABELS[item["issue_type"]]
         assert len(item["bounding_box"]) == 4
+        if item["location"] is not None:
+            assert item["latitude"] == item["location"]["latitude"]
+            assert item["longitude"] == item["location"]["longitude"]
 
     # Compare persisted rows with a direct call on the same stored bytes.
     expected, _ = inference.inference_with_annotation(inference.DEFAULT_WEIGHT_PATH, image)

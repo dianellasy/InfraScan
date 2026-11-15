@@ -74,8 +74,8 @@ class DetectionRecord(Base):
 
     `bounding_box` is `[x1, y1, x2, y2]` in pixels of the prediction source
     image at its original dimensions (not normalized YOLO coordinates and not
-    a fixed 640x640 grid). `location` stays NULL until detection-level GPS is
-    calculated; capture coordinates remain on `InferenceJob`.
+    a fixed 640x640 grid). `location` holds prototype projected GPS, or NULL
+    when a box cannot be projected. Capture coordinates remain on `InferenceJob`.
     """
 
     __tablename__ = "detection_records"

@@ -151,12 +151,15 @@ and uses `InferenceJobProcessor` (`backend/app/services/inference_processing.py`
    confidence threshold, preprocessing, and the severity heuristic are the same
    as in `inference_service`. The annotated JPEG is encoded in memory for this
    invocation and is never read from the shared `data/outputs/annotated.jpg`.
-3. In one new transaction, it saves one `EvidenceMedia` row, one
+3. It projects detection boxes onto a flat road using the sample camera profile
+   and the job's capture GPS (see Prototype geolocation below). Projection runs
+   with no database session open. Unprojectable detections retain NULL locations.
+4. In one new transaction, it saves one `EvidenceMedia` row, one
    `DetectionRecord` per detection (all pointing to that evidence row),
    `model_version`, and `completed`/`completed_at`. A completed job therefore
    always has its saved output. An empty detection list is a successful job with
    zero detection rows (the annotated image is still stored).
-4. If inference raises, its output is malformed, or the result transaction
+5. If inference raises, its output is malformed, or the result transaction
    fails, the error is logged with the job ID and the job is marked `failed`
    when the database is reachable. `completed_at` stays NULL for failed jobs.
 
@@ -176,9 +179,48 @@ keeps the `page`/`page_size` pagination and returns an empty `items` list for
 completed jobs with no detections. Both return `404` with
 `{"error":{"code":"JOB_NOT_FOUND",...}}` for unknown jobs. Each detection keeps
 the existing fields (`classification` is derived from the stored class ID;
-`latitude`/`longitude` are NULL until detection GPS exists) and adds
+`latitude`/`longitude` mirror the projected `location`, or are NULL) and adds
 `issue_id`, `issue_type`, `evidence_media`, `location`, `bounding_box`, and
 `frame_timestamp`.
+
+### Prototype geolocation
+
+The persisted job pipeline now calculates sample detection GPS in
+`InferenceJobProcessor.process`, immediately after YOLO and before saving results.
+The standalone model/smoke-test functions still return model output only, because
+they do not receive capture GPS. No migration or submission API change is needed;
+`GET /api/v1/jobs/{job_id}/detections` exposes the existing location fields.
+
+Edit `backend/inference/geolocation/camera_profiles.py` to configure the test:
+
+- `SAMPLE_CAMERA_PROFILE`: synthetic 4032 × 3024 calibration, `fx=fy=3000` pixels,
+  principal point `(2016, 1512)`, camera height `1.5` meters above the road,
+  pitch `0` degrees, maximum ground distance `100` meters.
+- `PROTOTYPE_HEADING_DEG`: fixed heading clockwise from true north, currently
+  `0` (north). All jobs use this assumption until per-capture heading is added.
+  This is unrelated to the EXIF Orientation rotation flag.
+
+These values are **illustrative, not a measured calibration of any device**.
+Restart workers after editing them. For tests or a later lookup, the processor
+also accepts `camera_profile=` and `heading_deg=` arguments. The chosen profile
+name and heading are logged; a calibration snapshot is not persisted yet.
+
+`projection.py` uses each box's **bottom center** as a ground contact estimate.
+It scales the pixel intrinsics to YOLO's original prediction-source dimensions,
+intersects the camera ray with a flat road, rotates the right/forward offset by
+heading, and moves from the job's capture GPS on a spherical Earth. Intrinsics
+use the [OpenCV pinhole convention](https://docs.opencv.org/4.x/d9/d0c/group__calib3d.html).
+The source image is made upright using EXIF Orientation before inference, so
+boxes, annotated images and the calibration all use that coordinate frame.
+
+The prototype assumes zero roll, zero lens distortion, and full-frame resizing;
+it does not infer crops, digital zoom, camera identity, or pose from metadata.
+An invalid box, ray at/above the horizon, intersection behind the camera, or
+distance over the configured limit produces a NULL location while preserving
+the detection and completing the job. Missing/invalid prediction dimensions
+fail the job because its coordinate frame is unknown. Empty detections still
+complete normally. Sample GPS values demonstrate the pipeline; accuracy testing
+requires matching measured intrinsics, mounting height, pitch and heading.
 
 ### Deferred limitations (post-MVP)
 
@@ -194,8 +236,9 @@ the existing fields (`classification` is derived from the stored class ID;
   `running`) need manual handling.
 - Failed jobs do not store an error message, so `error` in the job DTO stays
   NULL.
-- Detection GPS (`location`) is not calculated yet, and `frame_timestamp` is
-  NULL for still images.
+- Detection GPS uses the synthetic prototype profile above. Device lookup,
+  capture metadata parsing and per-image pose remain deferred. `frame_timestamp`
+  is NULL for still images.
 
 The controller bounds reads of the uploaded file, but this is not a
 server-wide request-body limit. Production deployment must separately
@@ -232,7 +275,7 @@ declarative `Base` in `backend/app/models/base.py`:
   `issue_id` (nullable UUID, NULL for now); and `issue_type` (required integer).
   `evidence_media` is a nullable foreign key to `evidence_media.media_id`.
   `location` is nullable `JSONB` (`{"latitude": ..., "longitude": ...}`, NULL
-  for now). `confidence` is a required double in `[0, 1]`. `severity` is
+  when projection is unavailable). `confidence` is a required double in `[0, 1]`. `severity` is
   required and must be `minor`, `moderate`, or `critical`. `bounding_box` is a
   required `JSONB` array of four numbers. `frame_timestamp` is a nullable
   nonnegative offset in seconds, NULL for still images. `detected_at` is a
@@ -446,7 +489,7 @@ database volume, run `docker compose down --volumes`.
 
 - current state:
 	- prototype have worked
-    - need to wire up with the rest project
+    - sample camera profile and flat-road projection are wired into the image job worker
     - need extensive testing though
     - Need to find top 2-3 most popular dashcams from India and America and provide support
        - for now, just pick one from each side and provide meta data parsing and extraction 

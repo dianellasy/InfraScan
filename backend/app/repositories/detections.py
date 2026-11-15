@@ -17,6 +17,7 @@ class NewDetection:
     confidence: float
     severity: str
     bounding_box: list[float]
+    location: dict[str, float] | None = None
 
 
 class DetectionRecordRepository:
@@ -38,7 +39,7 @@ class DetectionRecordRepository:
                 confidence=detection.confidence,
                 severity=detection.severity,
                 bounding_box=list(detection.bounding_box),
-                location=None,
+                location=detection.location,
                 frame_timestamp=None,
                 detected_at=detected_at,
             )

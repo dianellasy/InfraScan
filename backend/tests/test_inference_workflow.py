@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 import json
 import logging
+import math
 from io import BytesIO
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -309,7 +310,13 @@ def test_worker_persists_detections_with_shared_evidence_and_exact_values(
             assert record.bounding_box == detection["bbox_xyxy"]
             assert record.evidence_media == evidence.media_id
             assert record.issue_id is None
-            assert record.location is None
+            if detection["bbox_xyxy"][3] > v0_output["image_height"] / 2:
+                # This fixture's one below-horizon box is ahead and right of
+                # the sample north-facing camera; capture GPS remains on job.
+                assert record.location["latitude"] > float(job.latitude)
+                assert record.location["longitude"] > float(job.longitude)
+            else:
+                assert record.location is None
             assert record.frame_timestamp is None
             assert record.detected_at == detected_at
 
@@ -422,6 +429,48 @@ def test_result_persistence_failure_rolls_back_all_outputs(
         assert job.model_version is None
 
 
+@pytest.mark.parametrize("width", [None, 0, -10, True, 886.0])
+def test_missing_or_invalid_prediction_dimensions_fail_without_outputs(
+    session_factory: sessionmaker[Session], v0_output: dict, width,
+) -> None:
+    job_id = create_pending_job(session_factory)
+    result = {**v0_output, "image_width": width}
+    status = InferenceJobProcessor(
+        session_factory, lambda i, n: (result, ANNOTATED_JPEG)
+    ).process(job_id)
+    assert status == InferenceJobStatus.FAILED
+    assert count_rows(session_factory, DetectionRecord) == 0
+    assert count_rows(session_factory, EvidenceMedia) == 0
+
+
+def test_worker_uses_injected_camera_and_heading(
+    session_factory: sessionmaker[Session], v0_output: dict,
+) -> None:
+    from inference.geolocation import CameraProfile
+
+    profile = CameraProfile("test", 1000, 800, 500, 500, 500, 400, 2)
+    result = {**v0_output, "image_width": 1000, "image_height": 800,
+              "detections": [{**v0_output["detections"][0], "bbox_xyxy": [700, 500, 800, 600]}]}
+    job_id = create_pending_job(session_factory)
+    status = InferenceJobProcessor(
+        session_factory, lambda i, n: (result, ANNOTATED_JPEG),
+        camera_profile=profile, heading_deg=90,
+    ).process(job_id)
+    assert status == InferenceJobStatus.COMPLETED
+    with session_factory() as session:
+        job = session.get(InferenceJob, job_id)
+        location = job.detection_records[0].location
+        # Facing east: 5m forward goes east; 2.5m right goes south.
+        # Independently approximate the <6m move in the local tangent plane.
+        latitude, longitude = float(job.latitude), float(job.longitude)
+        expected_latitude = latitude - math.degrees(2.5 / 6_371_008.8)
+        expected_longitude = longitude + math.degrees(
+            5 / (6_371_008.8 * math.cos(math.radians(latitude)))
+        )
+        assert location["latitude"] == pytest.approx(expected_latitude, abs=1e-8)
+        assert location["longitude"] == pytest.approx(expected_longitude, abs=1e-8)
+
+
 def test_worker_skips_unknown_and_non_pending_jobs(
     session_factory: sessionmaker[Session], v0_output: dict
 ) -> None:
@@ -485,6 +534,12 @@ def test_end_to_end_submit_process_and_track(
     assert (page_one["total"], page_one["page"], page_one["page_size"]) == (5, 1, 2)
     assert len(page_one["items"]) == 2
     assert len(page_three["items"]) == 1
+
+    located = page_one["items"][1]
+    assert located["location"]["latitude"] > VALID_METADATA["latitude"]
+    assert located["location"]["longitude"] > VALID_METADATA["longitude"]
+    assert located["latitude"] == located["location"]["latitude"]
+    assert located["longitude"] == located["location"]["longitude"]
 
     first = page_one["items"][0]
     top = v0_output["detections"][0]

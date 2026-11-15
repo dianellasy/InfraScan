@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -16,6 +16,12 @@ from app.repositories import (
     EvidenceMediaRepository,
     InferenceJobRepository,
     NewDetection,
+)
+from inference.geolocation import (
+    CameraProfile,
+    PROTOTYPE_HEADING_DEG,
+    SAMPLE_CAMERA_PROFILE,
+    geolocate_detection,
 )
 
 logger = logging.getLogger(__name__)
@@ -34,6 +40,14 @@ class InferenceOutputError(ValueError):
 class ParsedInference:
     model_version: str
     detections: list[NewDetection]
+
+
+@dataclass(frozen=True)
+class ClaimedJob:
+    image: bytes
+    filename: str | None
+    latitude: float
+    longitude: float
 
 
 def _utc_now() -> datetime:
@@ -89,9 +103,9 @@ def parse_inference_output(result: Mapping[str, Any]) -> ParsedInference:
 class InferenceJobProcessor:
     """Runs one persisted inference job end to end.
 
-    Three short transactions: claim the pending job (mark it running), then
-    run inference with no session open, then save the evidence image, all
-    detections, and the completed status together. Ordinary failures mark the
+    Two short transactions: claim the pending job (mark it running), then
+    run inference and geolocation with no session open, then save the evidence
+    image, all detections, and the completed status together. Ordinary failures mark the
     job failed. Retries, duplicate-delivery guarantees, and recovery of
     stranded jobs are deferred until after the MVP.
     """
@@ -101,10 +115,17 @@ class InferenceJobProcessor:
         session_factory: Callable[[], Session],
         run_inference: InferenceRunner,
         clock: Callable[[], datetime] = _utc_now,
+        *,
+        camera_profile: CameraProfile = SAMPLE_CAMERA_PROFILE,
+        heading_deg: float = PROTOTYPE_HEADING_DEG,
     ) -> None:
         self._session_factory = session_factory
         self._run_inference = run_inference
         self._clock = clock
+        self._camera_profile = camera_profile
+        if not math.isfinite(heading_deg):
+            raise ValueError("Prototype heading must be finite")
+        self._heading_deg = heading_deg
 
     def process(self, job_id: UUID) -> InferenceJobStatus | None:
         """Return the job's final status, or None if this call did not run it."""
@@ -115,12 +136,17 @@ class InferenceJobProcessor:
             raise
         if claimed is None:
             return None
-        image, filename = claimed
-
         try:
-            result, annotated_jpeg = self._run_inference(image, filename)
+            result, annotated_jpeg = self._run_inference(claimed.image, claimed.filename)
             detected_at = self._clock()
             parsed = parse_inference_output(result)
+            parsed = self._geolocate(parsed, result, claimed)
+            logger.info(
+                "Job %s prototype geolocation profile=%s heading=%s located=%d/%d",
+                job_id, self._camera_profile.name, self._heading_deg,
+                sum(d.location is not None for d in parsed.detections),
+                len(parsed.detections),
+            )
         except Exception:
             logger.exception("Inference failed for job %s", job_id)
             self._mark_failed(job_id)
@@ -140,7 +166,27 @@ class InferenceJobProcessor:
         )
         return InferenceJobStatus.COMPLETED
 
-    def _claim(self, job_id: UUID) -> tuple[bytes, str | None] | None:
+    def _geolocate(
+        self, parsed: ParsedInference, result: Mapping[str, Any], source: ClaimedJob
+    ) -> ParsedInference:
+        """Enrich model boxes before persistence, with no database session open."""
+        width, height = result.get("image_width"), result.get("image_height")
+        if type(width) is not int or type(height) is not int or min(width, height) <= 0:
+            raise InferenceOutputError("Prediction dimensions must be positive integers")
+        detections = [
+            replace(
+                detection,
+                location=geolocate_detection(
+                    detection.bounding_box, width, height,
+                    latitude=source.latitude, longitude=source.longitude,
+                    heading_deg=self._heading_deg, profile=self._camera_profile,
+                ),
+            )
+            for detection in parsed.detections
+        ]
+        return replace(parsed, detections=detections)
+
+    def _claim(self, job_id: UUID) -> ClaimedJob | None:
         with self._session_factory() as session, session.begin():
             jobs = InferenceJobRepository(session)
             job = jobs.get_for_update(job_id)
@@ -153,7 +199,10 @@ class InferenceJobProcessor:
                 )
                 return None
             jobs.mark_running(job, started_at=self._clock())
-            return job.input_media.data, job.input_media.filename
+            return ClaimedJob(
+                job.input_media.data, job.input_media.filename,
+                float(job.latitude), float(job.longitude),
+            )
 
     def _save_results(
         self,
