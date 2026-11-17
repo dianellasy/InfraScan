@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 
 from app.api.dependencies import get_service
+from app.api.auth import AuthenticatedUser, require_authenticated
 from app.schemas import DetectionDTO, DetectionEvidenceDTO, Page
 from app.services.contracts import InfraScanService
 
@@ -13,6 +14,7 @@ router = APIRouter(prefix="/detections", tags=["detections"])
 
 @router.get("", response_model=Page[DetectionDTO])
 async def list_detections(
+    _user: Annotated[AuthenticatedUser, Depends(require_authenticated)],
     service: Annotated[InfraScanService, Depends(get_service)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 50,
@@ -46,6 +48,7 @@ async def list_detections(
 @router.get("/{detection_id}", response_model=DetectionDTO)
 async def get_detection(
     detection_id: UUID,
+    _user: Annotated[AuthenticatedUser, Depends(require_authenticated)],
     service: Annotated[InfraScanService, Depends(get_service)],
 ) -> DetectionDTO:
     return await service.get_detection(detection_id)
@@ -54,6 +57,7 @@ async def get_detection(
 @router.get("/{detection_id}/evidence", response_model=DetectionEvidenceDTO)
 async def get_detection_evidence(
     detection_id: UUID,
+    _user: Annotated[AuthenticatedUser, Depends(require_authenticated)],
     service: Annotated[InfraScanService, Depends(get_service)],
 ) -> DetectionEvidenceDTO:
     return await service.get_detection_evidence(detection_id)

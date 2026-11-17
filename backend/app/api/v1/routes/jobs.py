@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import JSONResponse
 
 from app.api.dependencies import get_service
+from app.api.auth import AuthenticatedUser, require_authenticated
 from app.api.errors import error_response
 from app.schemas import APIErrorResponse, DetectionDTO, InferenceJobDTO, Page
 from app.services.contracts import InfraScanService, JobNotFoundError
@@ -28,6 +29,7 @@ def _job_not_found() -> JSONResponse:
 
 @router.get("", response_model=Page[InferenceJobDTO])
 async def list_jobs(
+    _user: Annotated[AuthenticatedUser, Depends(require_authenticated)],
     service: Annotated[InfraScanService, Depends(get_service)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 50,
@@ -47,6 +49,7 @@ async def list_jobs(
 )
 async def get_job(
     job_id: UUID,
+    _user: Annotated[AuthenticatedUser, Depends(require_authenticated)],
     service: Annotated[InfraScanService, Depends(get_service)],
 ) -> InferenceJobDTO | JSONResponse:
     try:
@@ -62,6 +65,7 @@ async def get_job(
 )
 async def list_job_detections(
     job_id: UUID,
+    _user: Annotated[AuthenticatedUser, Depends(require_authenticated)],
     service: Annotated[InfraScanService, Depends(get_service)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 50,

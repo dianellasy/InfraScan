@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { endpoints } from "./api/endpoints.ts";
 import infrascanLogo from "./assets/infrascan.svg";
 import "./App.css";
+import { getAccessToken } from "./supabase.ts";
 
 type Job = {
   job_id: string;
@@ -41,7 +42,10 @@ function isSuccessful(status: string) {
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
+  const accessToken = await getAccessToken();
+  const headers = new Headers(init?.headers);
+  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+  const response = await fetch(url, { ...init, headers });
   if (!response.ok) {
     const body = await response.text();
     let message = body || response.statusText;

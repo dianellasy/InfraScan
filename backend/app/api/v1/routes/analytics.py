@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 
 from app.api.dependencies import get_service
+from app.api.auth import AuthenticatedUser, require_roles
 from app.schemas import (
     AnalyticsOverviewDTO,
     DamageDistributionDTO,
@@ -17,6 +18,17 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 @router.get("/overview", response_model=AnalyticsOverviewDTO)
 async def get_analytics_overview(
+    _user: Annotated[
+        AuthenticatedUser,
+        Depends(
+            require_roles(
+                "municipal_administrator",
+                "city_engineer",
+                "maintenance_crew",
+                "developer",
+            )
+        ),
+    ],
     service: Annotated[InfraScanService, Depends(get_service)],
     from_date: datetime | None = None,
     to_date: datetime | None = None,
@@ -26,6 +38,17 @@ async def get_analytics_overview(
 
 @router.get("/road-conditions", response_model=list[RoadConditionDTO])
 async def get_road_conditions(
+    _user: Annotated[
+        AuthenticatedUser,
+        Depends(
+            require_roles(
+                "municipal_administrator",
+                "city_engineer",
+                "maintenance_crew",
+                "developer",
+            )
+        ),
+    ],
     service: Annotated[InfraScanService, Depends(get_service)],
     from_date: datetime | None = None,
     to_date: datetime | None = None,
@@ -36,6 +59,17 @@ async def get_road_conditions(
 
 @router.get("/geographic", response_model=list[GeographicAggregateDTO])
 async def get_geographic_analytics(
+    _user: Annotated[
+        AuthenticatedUser,
+        Depends(
+            require_roles(
+                "municipal_administrator",
+                "city_engineer",
+                "maintenance_crew",
+                "developer",
+            )
+        ),
+    ],
     service: Annotated[InfraScanService, Depends(get_service)],
     from_date: datetime | None = None,
     to_date: datetime | None = None,
@@ -60,6 +94,17 @@ async def get_geographic_analytics(
 
 @router.get("/damage-distribution", response_model=list[DamageDistributionDTO])
 async def get_damage_distribution(
+    _user: Annotated[
+        AuthenticatedUser,
+        Depends(
+            require_roles(
+                "municipal_administrator",
+                "city_engineer",
+                "maintenance_crew",
+                "developer",
+            )
+        ),
+    ],
     service: Annotated[InfraScanService, Depends(get_service)],
     from_date: datetime | None = None,
     to_date: datetime | None = None,

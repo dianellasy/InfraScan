@@ -16,6 +16,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.api.dependencies import get_service
+from app.api.auth import AuthenticatedUser, require_roles
 from app.api.errors import error_response as _error_response
 from app.schemas import (
     APIErrorResponse,
@@ -432,6 +433,15 @@ _SUBMISSION_REQUEST_BODY = {
 async def submit_inference(
     request: Request,
     service: InfraScanService | None = Depends(_get_submission_service),
+    _user: AuthenticatedUser = Depends(
+        require_roles(
+            "citizen",
+            "city_engineer",
+            "maintenance_crew",
+            "municipal_administrator",
+            "developer",
+        )
+    ),
 ) -> InferenceJobAccepted | JSONResponse:
     try:
         upload, metadata = await _parse_multipart_request(request)

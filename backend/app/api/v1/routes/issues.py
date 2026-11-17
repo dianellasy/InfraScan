@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 
 from app.api.dependencies import get_service
+from app.api.auth import AuthenticatedUser, require_roles
 from app.schemas import IssueCreate, IssueDTO, IssueUpdate, Page
 from app.services.contracts import InfraScanService
 
@@ -12,6 +13,10 @@ router = APIRouter(prefix="/issues", tags=["issues"])
 
 @router.get("/review-queue", response_model=Page[IssueDTO])
 async def list_review_queue(
+    _user: Annotated[
+        AuthenticatedUser,
+        Depends(require_roles("municipal_administrator", "city_engineer")),
+    ],
     service: Annotated[InfraScanService, Depends(get_service)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 50,
@@ -32,6 +37,10 @@ async def list_issues(
 @router.post("", response_model=IssueDTO, status_code=status.HTTP_201_CREATED)
 async def create_issue(
     issue: IssueCreate,
+    _user: Annotated[
+        AuthenticatedUser,
+        Depends(require_roles("municipal_administrator", "city_engineer")),
+    ],
     service: Annotated[InfraScanService, Depends(get_service)],
 ) -> IssueDTO:
     return await service.create_issue(issue)
@@ -49,6 +58,16 @@ async def get_issue(
 async def update_issue(
     issue_id: UUID,
     update: IssueUpdate,
+    _user: Annotated[
+        AuthenticatedUser,
+        Depends(
+            require_roles(
+                "municipal_administrator",
+                "city_engineer",
+                "maintenance_crew",
+            )
+        ),
+    ],
     service: Annotated[InfraScanService, Depends(get_service)],
 ) -> IssueDTO:
     return await service.update_issue(issue_id, update)

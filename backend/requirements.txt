@@ -7,3 +7,5 @@ pillow>=10
 sqlalchemy>=2,<3
 psycopg[binary]>=3,<4
 alembic>=1.14,<2
+PyJWT[crypto]>=2.10,<3
+httpx>=0.28,<1

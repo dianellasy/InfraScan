@@ -117,10 +117,28 @@ codes include `INVALID_MULTIPART`, `UNEXPECTED_MULTIPART_FIELD`,
 `SERVICE_UNAVAILABLE`, `SUBMISSION_DEPENDENCY_UNAVAILABLE`, and
 `INTERNAL_ERROR`.
 
-Authentication is intentionally not enforced in this milestone. The future
-production request will carry `Authorization: Bearer <token>` and the backend
-will derive the authenticated user ID; client-supplied user IDs are rejected as
-unknown metadata.
+### Supabase authentication
+
+The React frontend and FastAPI backend use Supabase Auth. Copy `.env.example`
+to `.env`, set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` for Vite, and
+set `SUPABASE_URL` for FastAPI. Public citizens can create accounts; privileged
+roles must be assigned by a Supabase administrator through `auth.users`
+`app_metadata`, not the browser-editable `user_metadata`.
+
+For an administrator, set a role and municipality with Supabase SQL:
+
+```sql
+update auth.users
+set raw_app_meta_data =
+  coalesce(raw_app_meta_data, '{}'::jsonb) ||
+  '{"role":"city_engineer","municipality_id":"csuf-demo"}'::jsonb
+where id = '<supabase-user-uuid>';
+```
+
+Supported roles are `municipal_administrator`, `city_engineer`,
+`maintenance_crew`, `developer`, and `citizen`. FastAPI validates the Supabase
+JWT, derives the role from signed `app_metadata`, and rejects missing or
+expired bearer tokens. Run `alembic upgrade head` to create `user_profiles`.
 
 After validation, the application service reads the upload and, in one
 transaction, stores it as `InputMedia` (content type `image/jpeg`, taken from

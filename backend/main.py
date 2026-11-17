@@ -36,9 +36,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="InfraScan API", version="1.0.0", lifespan=lifespan)
+cors_origins = [
+    origin.strip()
+    for origin in os.environ.get(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:5173",
+    ).split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=cors_origins,
     allow_methods=["GET", "POST", "PATCH"],
     allow_headers=["*"],
 )
