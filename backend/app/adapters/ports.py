@@ -39,6 +39,11 @@ class MediaStorageAdapter(Protocol):
     ) -> StoredMedia:
         """Store one validated image inside the caller's open transaction."""
         ...
+    def put(
+      self, data: bytes, object_key: str, content_type: str
+    ) -> None:
+        """Store the image to R2 location using object_key """
+        ...
 
 
 class InferenceJobRepositoryAdapter(Protocol):

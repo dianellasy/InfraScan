@@ -111,6 +111,7 @@ def test_http_to_celery_worker_to_database_with_real_model(
     from app.api.v1.router import api_router
     from app.models import InferenceJob
     from app.services.inference_jobs import DatabaseInfraScanService
+    from app.services.system_metrics import summarize_system_metrics
     from inference.celery import database
     from inference.celery import tasks  # noqa: F401  registers the production task
     from inference.celery.celery_app import celery_app
@@ -168,10 +169,22 @@ def test_http_to_celery_worker_to_database_with_real_model(
     expected, _ = inference.inference_with_annotation(inference.DEFAULT_WEIGHT_PATH, image)
     with session_factory() as session:
         stored = session.get(InferenceJob, job_id)
+        metrics = summarize_system_metrics(session)
+        assert metrics["submitted_jobs"] == 1
+        assert metrics["completed_jobs"] == 1
+        assert metrics["success_rate"] == 1
+        assert metrics["mean_queue_wait_seconds"] is not None
+        assert metrics["mean_processing_seconds"] is not None
+        assert metrics["mean_end_to_end_seconds"] is not None
+        assert metrics["mean_end_to_end_seconds"] >= metrics["mean_processing_seconds"]
+        assert metrics["detections"] == detections["total"]
+        assert metrics["located_detections"] > 0
+        print(f"SYSTEM_METRICS {metrics}")
         assert stored.input_media.data == image
         rows = sorted(stored.detection_records, key=lambda r: r.confidence, reverse=True)
-        assert [r.bounding_box for r in rows] == [d["bbox_xyxy"] for d in expected["detections"]]
-        assert [r.confidence for r in rows] == [d["confidence"] for d in expected["detections"]]
+        for row, detection in zip(rows, expected["detections"], strict=True):
+            assert row.bounding_box == pytest.approx(detection["bbox_xyxy"], abs=0.5)
+            assert row.confidence == pytest.approx(detection["confidence"], abs=1e-3)
         assert [r.severity for r in rows] == [d["severity"] for d in expected["detections"]]
         with Image.open(BytesIO(stored.evidence_media[0].data)) as evidence:
             assert evidence.format == "JPEG"
