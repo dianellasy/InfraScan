@@ -21,10 +21,6 @@ from app.schemas import (
 if TYPE_CHECKING:
     from app.models import InferenceJob
 
-# The media, job, and queue adapters below are blocking. The application
-# service calls them from a worker thread, never on the FastAPI event loop.
-# Media and job adapters are session-bound and never commit; the caller owns
-# the transaction.
 
 
 class StoredMedia(Protocol):
@@ -34,17 +30,18 @@ class StoredMedia(Protocol):
 
 
 class MediaStorageAdapter(Protocol):
-    def store(
-        self, data: bytes, content_type: str, filename: str | None
-    ) -> StoredMedia:
-        """Store one validated image inside the caller's open transaction."""
-        ...
     def put(
       self, data: bytes, object_key: str, content_type: str
     ) -> None:
         """Store the image to R2 location using object_key """
         ...
+    def get(self, key: str) -> bytes:
+        """Using the key, find and return the image"""
+        ...
 
+    def delete(self, key: str) -> None:
+        """Using the key, find and delete the image"""
+        ...
 
 class InferenceJobRepositoryAdapter(Protocol):
     def create_pending(
