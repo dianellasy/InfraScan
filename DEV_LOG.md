@@ -107,3 +107,11 @@ Current pipeline now include geolocation results. Next will work on video suppor
 - send camera model as a part of metadata
 - the backend will store a small table of camera/devices and their intrincisc
 - and we can allow users to enter the details themselves
+
+
+## 9. R2 Storage Migration
+Currently working to migrate all media storage to an object storage. We will use cloudflare R2 and then transition to S3 later when the team got a chance to create the aws resource
+- task:
+    - 1) upload (DONE)
+    - 2) download
+    - 3) delete 
