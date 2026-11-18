@@ -122,18 +122,20 @@ production request will carry `Authorization: Bearer <token>` and the backend
 will derive the authenticated user ID; client-supplied user IDs are rejected as
 unknown metadata.
 
-After validation, the application service reads the upload and, in one
-transaction, stores it as `InputMedia` (content type `image/jpeg`, taken from
-validation rather than the client) and creates a `pending` `InferenceJob` with
-`captured_at`, `latitude`, and `longitude`. Only after that commit does it
-publish the Celery task `infrascan.process_inference_job` whose single argument
-is the job ID string. `submitted_at` is the persisted `created_at`. The request
-never waits for inference. Database and broker calls run in a worker thread,
-off the event loop, each with its own short-lived session.
+After validation, the application service creates the input media UUID and
+uploads the JPEG with object key `/input/upload/{media_id}`. It then uses one
+database transaction to insert the `InputMedia` metadata and R2 object key and
+create a `pending` `InferenceJob` with `captured_at`, `latitude`, and
+`longitude`. Only after that commit does it publish the Celery task
+`infrascan.process_inference_job` whose single argument is the job ID string.
+`submitted_at` is the persisted `created_at`. The request never waits for
+inference. Storage, database, and broker calls run in a worker thread, off the
+event loop, each with its own short-lived session.
 
-- If the database is unreachable, the response is
-  `503 SUBMISSION_DEPENDENCY_UNAVAILABLE` and nothing is enqueued. Any other
-  persistence error rolls back both rows and returns `500 INTERNAL_ERROR`.
+- If R2 or the database is unreachable, the response is
+  `503 SUBMISSION_DEPENDENCY_UNAVAILABLE` and nothing is enqueued. A failed
+  database transaction triggers a best-effort deletion of the R2 object. Any
+  other persistence error rolls back both rows and returns `500 INTERNAL_ERROR`.
 - If publishing fails, the response is `503 SUBMISSION_DEPENDENCY_UNAVAILABLE`
   and the already-committed job is marked `failed` (best effort).
 
@@ -143,10 +145,11 @@ The Celery task (`backend/inference/celery/tasks.py`) receives only the job ID
 and uses `InferenceJobProcessor` (`backend/app/services/inference_processing.py`):
 
 1. In a short transaction, it row-locks the job. If the job is still
-   `pending`, it marks it `running` with `started_at` and reads the input image,
-   then commits and closes the session. Unknown or non-pending jobs are logged
-   and skipped.
-2. It runs the v0-mvp pipeline with no session open
+   `pending`, it marks it `running` with `started_at` and reads the input media
+   reference, then commits and closes the session. Unknown or non-pending jobs
+   are logged and skipped.
+2. It downloads the input image from R2 and runs the v0-mvp pipeline with no
+   session open
    (`inference_with_annotation` in `backend/inference/service.py`). Weights,
    confidence threshold, preprocessing, and the severity heuristic are the same
    as in `inference_service`. The annotated JPEG is encoded in memory for this

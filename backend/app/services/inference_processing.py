@@ -10,6 +10,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.adapters.ports import MediaStorageAdapter
 from app.models import DETECTION_SEVERITIES, InferenceJobStatus
 from app.repositories import (
     DetectionRecordRepository,
@@ -44,7 +45,8 @@ class ParsedInference:
 
 @dataclass(frozen=True)
 class ClaimedJob:
-    image: bytes
+    image: bytes | None
+    object_storage_key: str | None
     filename: str | None
     latitude: float
     longitude: float
@@ -116,12 +118,14 @@ class InferenceJobProcessor:
         run_inference: InferenceRunner,
         clock: Callable[[], datetime] = _utc_now,
         *,
+        media_storage: MediaStorageAdapter | None = None,
         camera_profile: CameraProfile = SAMPLE_CAMERA_PROFILE,
         heading_deg: float = PROTOTYPE_HEADING_DEG,
     ) -> None:
         self._session_factory = session_factory
         self._run_inference = run_inference
         self._clock = clock
+        self._media_storage = media_storage
         self._camera_profile = camera_profile
         if not math.isfinite(heading_deg):
             raise ValueError("Prototype heading must be finite")
@@ -137,7 +141,8 @@ class InferenceJobProcessor:
         if claimed is None:
             return None
         try:
-            result, annotated_jpeg = self._run_inference(claimed.image, claimed.filename)
+            image = self._load_input_media(claimed)
+            result, annotated_jpeg = self._run_inference(image, claimed.filename)
             detected_at = self._clock()
             parsed = parse_inference_output(result)
             parsed = self._geolocate(parsed, result, claimed)
@@ -200,9 +205,23 @@ class InferenceJobProcessor:
                 return None
             jobs.mark_running(job, started_at=self._clock())
             return ClaimedJob(
-                job.input_media.data, job.input_media.filename,
-                float(job.latitude), float(job.longitude),
+                image=job.input_media.data,
+                object_storage_key=job.input_media.object_storage_key,
+                filename=job.input_media.filename,
+                latitude=float(job.latitude),
+                longitude=float(job.longitude),
             )
+
+    def _load_input_media(self, claimed: ClaimedJob) -> bytes:
+        if claimed.object_storage_key is not None:
+            if self._media_storage is None:
+                raise RuntimeError(
+                    "Object-backed input media requires a media storage adapter"
+                )
+            return self._media_storage.get(claimed.object_storage_key)
+        if claimed.image is not None:
+            return claimed.image
+        raise RuntimeError("Input media has no payload")
 
     def _save_results(
         self,

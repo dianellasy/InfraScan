@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.adapters.celery_queue import CeleryInferenceQueue
+from app.adapters.r2_storage import R2MediaStorageAdapter
 from app.api.errors import register_exception_handlers
 from app.api.v1.router import api_router
 from app.db import create_db_engine, create_session_factory
@@ -24,9 +25,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
         return
 
+    media_storage = R2MediaStorageAdapter()
     engine = create_db_engine()
     app.state.infrascan_service = DatabaseInfraScanService(
-        create_session_factory(engine), CeleryInferenceQueue(celery_app)
+        create_session_factory(engine),
+        CeleryInferenceQueue(celery_app),
+        media_storage,
     )
     try:
         yield

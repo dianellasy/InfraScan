@@ -38,6 +38,20 @@ def _jpeg(image: Image.Image) -> bytes:
     return buffer.getvalue()
 
 
+class InMemoryMediaStorage:
+    def __init__(self) -> None:
+        self.objects: dict[str, bytes] = {}
+
+    def put(self, data: bytes, object_key: str, content_type: str) -> None:
+        self.objects[object_key] = data
+
+    def get(self, key: str) -> bytes:
+        return self.objects[key]
+
+    def delete(self, key: str) -> None:
+        self.objects.pop(key, None)
+
+
 def test_service_uses_central_label_map() -> None:
     assert inference.label_map is CLASS_LABELS
     assert inference.MODEL_NAME == "infrascan-rdd2022-yolo11s"
@@ -119,10 +133,12 @@ def test_http_to_celery_worker_to_database_with_real_model(
     monkeypatch.setenv("DATABASE_URL", migrated_engine.url.render_as_string(hide_password=False))
     database.dispose_engine()
     celery_app.conf.update(broker_url="memory://", result_backend="cache+memory://")
+    media_storage = InMemoryMediaStorage()
+    monkeypatch.setattr(tasks, "R2MediaStorageAdapter", lambda: media_storage)
 
     app = FastAPI()
     app.state.infrascan_service = DatabaseInfraScanService(
-        session_factory, CeleryInferenceQueue(celery_app)
+        session_factory, CeleryInferenceQueue(celery_app), media_storage
     )
     app.include_router(api_router, prefix="/api/v1")
     image = _jpeg(Image.open(SMOKE_IMAGE))
@@ -180,7 +196,8 @@ def test_http_to_celery_worker_to_database_with_real_model(
         assert metrics["detections"] == detections["total"]
         assert metrics["located_detections"] > 0
         print(f"SYSTEM_METRICS {metrics}")
-        assert stored.input_media.data == image
+        assert stored.input_media.data is None
+        assert media_storage.objects[stored.input_media.object_storage_key] == image
         rows = sorted(stored.detection_records, key=lambda r: r.confidence, reverse=True)
         for row, detection in zip(rows, expected["detections"], strict=True):
             assert row.bounding_box == pytest.approx(detection["bbox_xyxy"], abs=0.5)

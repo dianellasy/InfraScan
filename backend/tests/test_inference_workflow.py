@@ -109,6 +109,29 @@ class RecordingQueue:
             raise self._error
 
 
+class InMemoryMediaStorage:
+    def __init__(self, put_error: Exception | None = None) -> None:
+        self._put_error = put_error
+        self.objects: dict[str, tuple[bytes, str]] = {}
+        self.puts: list[str] = []
+        self.deletes: list[str] = []
+        self.ran_on_event_loop: list[bool] = []
+
+    def put(self, data: bytes, object_key: str, content_type: str) -> None:
+        self.ran_on_event_loop.append(_on_event_loop())
+        self.puts.append(object_key)
+        if self._put_error is not None:
+            raise self._put_error
+        self.objects[object_key] = (data, content_type)
+
+    def get(self, key: str) -> bytes:
+        return self.objects[key][0]
+
+    def delete(self, key: str) -> None:
+        self.deletes.append(key)
+        self.objects.pop(key, None)
+
+
 class FakeCeleryApp:
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple, dict]] = []
@@ -123,6 +146,16 @@ def build_client(service: DatabaseInfraScanService) -> TestClient:
     register_exception_handlers(app)
     app.include_router(api_router, prefix="/api/v1")
     return TestClient(app)
+
+
+def build_service(
+    session_factory: sessionmaker[Session],
+    queue: RecordingQueue,
+    media_storage: InMemoryMediaStorage | None = None,
+) -> DatabaseInfraScanService:
+    return DatabaseInfraScanService(
+        session_factory, queue, media_storage or InMemoryMediaStorage()
+    )
 
 
 def submit(client: TestClient, image: bytes | None = None, filename: str = "road.jpg"):
@@ -168,8 +201,11 @@ def test_celery_queue_publishes_only_the_job_id_string() -> None:
 def test_database_unavailable_at_submission_does_not_enqueue(tmp_path: Path) -> None:
     engine = create_db_engine(f"postgresql://postgres@/missing?host={tmp_path}")
     queue = RecordingQueue(create_session_factory(engine))
+    media_storage = InMemoryMediaStorage()
     try:
-        with build_client(DatabaseInfraScanService(create_session_factory(engine), queue)) as client:
+        with build_client(
+            build_service(create_session_factory(engine), queue, media_storage)
+        ) as client:
             response = submit(client)
     finally:
         engine.dispose()
@@ -177,18 +213,37 @@ def test_database_unavailable_at_submission_does_not_enqueue(tmp_path: Path) -> 
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "SUBMISSION_DEPENDENCY_UNAVAILABLE"
     assert queue.job_ids == []
+    assert media_storage.objects == {}
+    assert media_storage.deletes == media_storage.puts
 
 
 # --- Submission ---
+
+
+def test_object_storage_failure_does_not_insert_or_enqueue(
+    session_factory: sessionmaker[Session],
+) -> None:
+    queue = RecordingQueue(session_factory)
+    media_storage = InMemoryMediaStorage(ConnectionError("R2 unavailable"))
+
+    with build_client(build_service(session_factory, queue, media_storage)) as client:
+        response = submit(client)
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "SUBMISSION_DEPENDENCY_UNAVAILABLE"
+    assert queue.job_ids == []
+    assert count_rows(session_factory, InputMedia) == 0
+    assert count_rows(session_factory, InferenceJob) == 0
 
 
 def test_submission_commits_media_and_job_before_enqueue(
     session_factory: sessionmaker[Session],
 ) -> None:
     queue = RecordingQueue(session_factory)
+    media_storage = InMemoryMediaStorage()
     image = make_jpeg()
 
-    with build_client(DatabaseInfraScanService(session_factory, queue)) as client:
+    with build_client(build_service(session_factory, queue, media_storage)) as client:
         response = submit(client, image)
 
     assert response.status_code == 202
@@ -200,6 +255,7 @@ def test_submission_commits_media_and_job_before_enqueue(
     assert queue.job_ids == [job_id]
     assert queue.committed_at_publish == [True]
     assert queue.ran_on_event_loop == [False]
+    assert media_storage.ran_on_event_loop == [False]
 
     with session_factory() as session:
         job = session.get(InferenceJob, job_id)
@@ -212,9 +268,13 @@ def test_submission_commits_media_and_job_before_enqueue(
         assert body["submitted_at"].endswith("Z")
         assert datetime.fromisoformat(body["submitted_at"]) == job.created_at
         # Content type comes from validation, not the client's declared image/png.
-        assert job.input_media.data == image
+        assert job.input_media.data is None
         assert job.input_media.content_type == "image/jpeg"
         assert job.input_media.filename == "road.jpg"
+        expected_key = f"/input/upload/{job.input_media.media_id}"
+        assert job.input_media.object_storage_key == expected_key
+        assert media_storage.puts == [expected_key]
+        assert media_storage.objects[expected_key] == (image, "image/jpeg")
 
 
 @pytest.mark.parametrize(
@@ -232,13 +292,15 @@ def test_job_insert_failure_rolls_back_media_and_does_not_enqueue(
     code: str,
 ) -> None:
     def fail(self, media, metadata):
-        assert media.media_id is not None  # media row was already flushed
+        assert media.media_id is not None
+        assert media.object_storage_key == f"/input/upload/{media.media_id}"
         raise error
 
     monkeypatch.setattr(InferenceJobRepository, "create_pending", fail)
     queue = RecordingQueue(session_factory)
+    media_storage = InMemoryMediaStorage()
 
-    with build_client(DatabaseInfraScanService(session_factory, queue)) as client:
+    with build_client(build_service(session_factory, queue, media_storage)) as client:
         response = submit(client)
 
     assert response.status_code == status_code
@@ -246,14 +308,17 @@ def test_job_insert_failure_rolls_back_media_and_does_not_enqueue(
     assert queue.job_ids == []
     assert count_rows(session_factory, InputMedia) == 0
     assert count_rows(session_factory, InferenceJob) == 0
+    assert media_storage.objects == {}
+    assert media_storage.deletes == media_storage.puts
 
 
 def test_queue_publication_error_returns_dependency_error_and_fails_job(
     session_factory: sessionmaker[Session],
 ) -> None:
     queue = RecordingQueue(session_factory, error=ConnectionRefusedError("broker down"))
+    media_storage = InMemoryMediaStorage()
 
-    with build_client(DatabaseInfraScanService(session_factory, queue)) as client:
+    with build_client(build_service(session_factory, queue, media_storage)) as client:
         response = submit(client)
 
     assert response.status_code == 503
@@ -263,6 +328,7 @@ def test_queue_publication_error_returns_dependency_error_and_fails_job(
         job = session.get(InferenceJob, queue.job_ids[0])
         assert job.status == "failed"
         assert job.input_media is not None
+        assert job.input_media.object_storage_key in media_storage.objects
 
 
 # --- Worker processing ---
@@ -494,7 +560,8 @@ def test_end_to_end_submit_process_and_track(
     session_factory: sessionmaker[Session], v0_output: dict
 ) -> None:
     queue = RecordingQueue(session_factory)
-    service = DatabaseInfraScanService(session_factory, queue)
+    media_storage = InMemoryMediaStorage()
+    service = build_service(session_factory, queue, media_storage)
 
     with build_client(service) as client:
         accepted = submit(client).json()
@@ -506,7 +573,9 @@ def test_end_to_end_submit_process_and_track(
         assert client.get(f"/api/v1/jobs/{job_id}/detections").json()["items"] == []
 
         InferenceJobProcessor(
-            session_factory, lambda i, n: (v0_output, ANNOTATED_JPEG)
+            session_factory,
+            lambda i, n: (v0_output, ANNOTATED_JPEG),
+            media_storage=media_storage,
         ).process(queue.job_ids[0])
 
         job = client.get(f"/api/v1/jobs/{job_id}").json()
@@ -566,7 +635,9 @@ def test_successful_zero_detection_job_lists_empty_page(
         session_factory, lambda i, n: ({**v0_output, "detections": []}, ANNOTATED_JPEG)
     ).process(job_id)
 
-    with build_client(DatabaseInfraScanService(session_factory, RecordingQueue(session_factory))) as client:
+    with build_client(
+        build_service(session_factory, RecordingQueue(session_factory))
+    ) as client:
         response = client.get(f"/api/v1/jobs/{job_id}/detections")
         job = client.get(f"/api/v1/jobs/{job_id}").json()
 
@@ -577,7 +648,9 @@ def test_successful_zero_detection_job_lists_empty_page(
 
 @pytest.mark.parametrize("suffix", ["", "/detections"])
 def test_unknown_job_returns_404(session_factory: sessionmaker[Session], suffix: str) -> None:
-    with build_client(DatabaseInfraScanService(session_factory, RecordingQueue(session_factory))) as client:
+    with build_client(
+        build_service(session_factory, RecordingQueue(session_factory))
+    ) as client:
         response = client.get(f"/api/v1/jobs/{uuid4()}{suffix}")
 
     assert response.status_code == 404
@@ -634,6 +707,7 @@ def test_app_with_database_url_wires_database_service(monkeypatch: pytest.Monkey
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:secret@localhost:1/infrascan")
     import main
 
+    monkeypatch.setattr(main, "R2MediaStorageAdapter", InMemoryMediaStorage)
     with TestClient(main.app) as client:
         assert isinstance(main.app.state.infrascan_service, DatabaseInfraScanService)
         not_implemented = client.get("/api/v1/issues")

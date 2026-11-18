@@ -7,6 +7,7 @@ from uuid import UUID
 
 from celery.signals import worker_process_init, worker_process_shutdown
 
+from app.adapters.r2_storage import R2MediaStorageAdapter
 from app.services.inference_processing import InferenceJobProcessor
 from inference.celery import database
 from inference.celery.celery_app import PROCESS_INFERENCE_JOB_TASK, celery_app
@@ -62,6 +63,8 @@ def process_inference_job(job_id: str) -> None:
         logger.error("Ignoring inference task with invalid job_id %r", job_id)
         return
     processor = InferenceJobProcessor(
-        database.get_session_factory(), run_inference=run_v0_mvp_inference
+        database.get_session_factory(),
+        run_inference=run_v0_mvp_inference,
+        media_storage=R2MediaStorageAdapter(),
     )
     processor.process(parsed_job_id)
