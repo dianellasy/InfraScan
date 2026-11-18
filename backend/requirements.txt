@@ -9,4 +9,4 @@ psycopg[binary]>=3,<4
 alembic>=1.14,<2
 boto3>=1,<2
 python-dotenv>=1,<2
-uuid-extensions
+uuid7>=0.1,<1

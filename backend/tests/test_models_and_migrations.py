@@ -60,17 +60,25 @@ def test_input_media_model_columns_and_relationship() -> None:
         "data",
         "content_type",
         "filename",
+        "object_storage_key",
     }
 
     assert table.c.media_id.primary_key is True
     assert table.c.media_id.nullable is False
-    assert table.c.data.nullable is False
+    assert table.c.data.nullable is True
     assert (
         table.c.data.type.dialect_impl(postgresql.dialect()).__class__
         is postgresql.BYTEA
     )
     assert table.c.content_type.nullable is False
     assert table.c.filename.nullable is True
+    assert table.c.object_storage_key.nullable is True
+    check_names = {
+        constraint.name
+        for constraint in table.constraints
+        if isinstance(constraint, sa.CheckConstraint)
+    }
+    assert check_names == {"ck_input_media_data_or_object_storage_key"}
 
     rel = sa.inspect(InputMedia).relationships["jobs"]
     assert rel.back_populates == "input_media"
@@ -252,6 +260,11 @@ def test_alembic_renders_upgrade_and_downgrade_sql_offline() -> None:
     assert "confidence DOUBLE PRECISION NOT NULL" in sql
     assert "REFERENCES issues" not in sql
     assert "REFERENCES issue_types" not in sql
+    assert "ADD COLUMN object_storage_key" in sql
+    assert sql.count("ADD COLUMN object_storage_key") == 2
+    assert "ck_input_media_data_or_object_storage_key" in sql
+    assert "ck_evidence_media_data_or_object_storage_key" in sql
+    assert "data IS NOT NULL OR object_storage_key IS NOT NULL" in sql
 
     downgrade = _run_alembic(
         "downgrade",

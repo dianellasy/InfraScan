@@ -251,8 +251,10 @@ SQLAlchemy 2.x ORM models live under `backend/app/models/` and share the
 declarative `Base` in `backend/app/models/base.py`:
 
 - `InputMedia` (`input_media`): stores `media_id` (UUID primary key), `data`
-  (required PostgreSQL `BYTEA` payload for JPEG bytes), `content_type`
-  (required string), and `filename` (nullable string).
+  (nullable PostgreSQL `BYTEA` payload for JPEG bytes), `content_type`
+  (required string), `filename` (nullable string), and `object_storage_key`
+  (nullable string referencing an R2 object key). A check constraint requires
+  at least one of `data` or `object_storage_key`.
 - `InferenceJob` (`inference_jobs`): stores `job_id` (UUID primary key),
   `user_id` (nullable UUID without a foreign key until authentication and a
   `users` table exist), `input_media_id` (required foreign key to
@@ -266,9 +268,11 @@ declarative `Base` in `backend/app/models/base.py`:
   `longitude` (required `NUMERIC` in `[-180, 180]`).
 - `EvidenceMedia` (`evidence_media`): stores the annotated evidence JPEG,
   separate from the input. Columns are `media_id` (UUID primary key), `job_id`
-  (required, indexed foreign key to `inference_jobs`), `data` (`BYTEA`),
-  `content_type`, and `filename` (nullable). All detections from one processed
-  image share one evidence row.
+  (required, indexed foreign key to `inference_jobs`), `data` (nullable
+  `BYTEA`), `content_type`, `filename` (nullable), and `object_storage_key`
+  (nullable string referencing an R2 object key). A check constraint requires
+  at least one of `data` or `object_storage_key`. All detections from one
+  processed image share one evidence row.
 - `DetectionRecord` (`detection_records`): one row per detection. Columns are
   `detection_id` (UUID primary key); `job_id` (required, indexed, non-unique
   foreign key to `inference_jobs`, so one job has zero or more detections);
@@ -376,7 +380,9 @@ applying**:
 | Revision | Creates |
 | --- | --- |
 | `7c4e9a1b2d01` | `input_media`, `inference_jobs` |
-| `9e2b6d4f1a37` (head) | `evidence_media`, `detection_records` |
+| `9e2b6d4f1a37` | `evidence_media`, `detection_records` |
+| `a1c3e5f70829` | nullable `object_storage_key` on `input_media` and `evidence_media` |
+| `b2d4f6a81930` (head) | nullable `data` plus `data OR object_storage_key` check on both media tables |
 
 ### Running the inference workflow
 

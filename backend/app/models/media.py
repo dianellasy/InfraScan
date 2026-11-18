@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from sqlalchemy import ForeignKey, LargeBinary, String, Uuid, text
+from sqlalchemy import CheckConstraint, ForeignKey, LargeBinary, String, Uuid, text
 from sqlalchemy.dialects.postgresql import BYTEA
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -13,11 +13,20 @@ if TYPE_CHECKING:
     from app.models.detection_record import DetectionRecord
     from app.models.inference_job import InferenceJob
 
+# At least one payload reference must be present: inline bytes and/or an R2 key.
+MEDIA_PAYLOAD_CHECK = "data IS NOT NULL OR object_storage_key IS NOT NULL"
+
 
 class InputMedia(Base):
     """Persisted input image payload referenced by one or more inference jobs."""
 
     __tablename__ = "input_media"
+    __table_args__ = (
+        CheckConstraint(
+            MEDIA_PAYLOAD_CHECK,
+            name="data_or_object_storage_key",
+        ),
+    )
 
     media_id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True),
@@ -25,15 +34,19 @@ class InputMedia(Base):
         default=uuid4,
         server_default=text("gen_random_uuid()"),
     )
-    data: Mapped[bytes] = mapped_column(
+    data: Mapped[bytes | None] = mapped_column(
         LargeBinary().with_variant(BYTEA(), "postgresql"),
-        nullable=False,
+        nullable=True,
     )
     content_type: Mapped[str] = mapped_column(
         String(),
         nullable=False,
     )
     filename: Mapped[str | None] = mapped_column(
+        String(),
+        nullable=True,
+    )
+    object_storage_key: Mapped[str | None] = mapped_column(
         String(),
         nullable=True,
     )
@@ -56,6 +69,12 @@ class EvidenceMedia(Base):
     """
 
     __tablename__ = "evidence_media"
+    __table_args__ = (
+        CheckConstraint(
+            MEDIA_PAYLOAD_CHECK,
+            name="data_or_object_storage_key",
+        ),
+    )
 
     media_id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True),
@@ -69,15 +88,19 @@ class EvidenceMedia(Base):
         nullable=False,
         index=True,
     )
-    data: Mapped[bytes] = mapped_column(
+    data: Mapped[bytes | None] = mapped_column(
         LargeBinary().with_variant(BYTEA(), "postgresql"),
-        nullable=False,
+        nullable=True,
     )
     content_type: Mapped[str] = mapped_column(
         String(),
         nullable=False,
     )
     filename: Mapped[str | None] = mapped_column(
+        String(),
+        nullable=True,
+    )
+    object_storage_key: Mapped[str | None] = mapped_column(
         String(),
         nullable=True,
     )

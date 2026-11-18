@@ -101,17 +101,23 @@ def test_evidence_media_columns() -> None:
         "data",
         "content_type",
         "filename",
+        "object_storage_key",
     }
     assert table.c.media_id.primary_key is True
     assert table.c.job_id.nullable is False
     assert _fk_targets(table.c.job_id) == {"inference_jobs.job_id"}
-    assert table.c.data.nullable is False
+    assert table.c.data.nullable is True
     assert (
         table.c.data.type.dialect_impl(postgresql.dialect()).__class__
         is postgresql.BYTEA
     )
     assert table.c.content_type.nullable is False
     assert table.c.filename.nullable is True
+    assert table.c.object_storage_key.nullable is True
+    check_names = {
+        c.name for c in table.constraints if isinstance(c, sa.CheckConstraint)
+    }
+    assert check_names == {"ck_evidence_media_data_or_object_storage_key"}
 
 
 def test_bidirectional_one_to_many_relationships() -> None:
@@ -230,6 +236,37 @@ def test_evidence_requires_existing_job(session_factory: sessionmaker[Session]) 
             session.flush()
 
 
+def test_media_requires_data_or_object_storage_key(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        session.add(InputMedia(content_type="image/jpeg"))
+        with pytest.raises(IntegrityError):
+            session.flush()
+
+    with session_factory() as session:
+        job = _add_job(session)
+        session.add(EvidenceMedia(job=job, content_type="image/jpeg"))
+        with pytest.raises(IntegrityError):
+            session.flush()
+
+    with session_factory() as session, session.begin():
+        session.add(
+            InputMedia(
+                content_type="image/jpeg",
+                object_storage_key="images/input/example.jpg",
+            )
+        )
+        job = _add_job(session)
+        session.add(
+            EvidenceMedia(
+                job=job,
+                content_type="image/jpeg",
+                object_storage_key="images/evidence/example.jpg",
+            )
+        )
+
+
 @pytest.mark.parametrize(
     "column", ["issue_type", "confidence", "severity", "bounding_box", "detected_at"]
 )
@@ -307,7 +344,9 @@ def test_deleting_job_with_detections_is_restricted(
             session.flush()
 
 
-def test_downgrade_one_revision_keeps_initial_tables(disposable_postgres_url: str) -> None:
+def test_downgrade_one_revision_restores_required_media_data(
+    disposable_postgres_url: str,
+) -> None:
     up = run_alembic("upgrade", "head", database_url=disposable_postgres_url)
     assert up.returncode == 0, up.stderr
     down = run_alembic("downgrade", "-1", database_url=disposable_postgres_url)
@@ -317,12 +356,27 @@ def test_downgrade_one_revision_keeps_initial_tables(disposable_postgres_url: st
         disposable_postgres_url.replace("postgresql://", "postgresql+psycopg://", 1)
     )
     try:
-        tables = set(sa.inspect(engine).get_table_names())
+        inspector = sa.inspect(engine)
+        input_cols = {
+            col["name"]: col for col in inspector.get_columns("input_media")
+        }
+        evidence_cols = {
+            col["name"]: col for col in inspector.get_columns("evidence_media")
+        }
+        input_checks = {
+            c["name"] for c in inspector.get_check_constraints("input_media")
+        }
+        evidence_checks = {
+            c["name"] for c in inspector.get_check_constraints("evidence_media")
+        }
     finally:
         engine.dispose()
-    assert {"input_media", "inference_jobs"}.issubset(tables)
-    assert "evidence_media" not in tables
-    assert "detection_records" not in tables
+    assert input_cols["data"]["nullable"] is False
+    assert evidence_cols["data"]["nullable"] is False
+    assert "object_storage_key" in input_cols
+    assert "object_storage_key" in evidence_cols
+    assert "ck_input_media_data_or_object_storage_key" not in input_checks
+    assert "ck_evidence_media_data_or_object_storage_key" not in evidence_checks
 
     again = run_alembic("upgrade", "head", database_url=disposable_postgres_url)
     assert again.returncode == 0, again.stderr
