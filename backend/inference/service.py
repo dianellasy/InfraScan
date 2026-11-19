@@ -16,8 +16,9 @@ from inference.labels import CLASS_LABELS, class_label
 label_map = CLASS_LABELS
 
 # Which model made a detection. Update both when weights/best.pt changes.
-MODEL_NAME = "infrascan-rdd2022-yolo11s"
-MODEL_VERSION = "v0-mvp"
+# v1 = run e7 (YOLO26s, RDD2022 India+US + CMIRD Indian motorbike frames), see ml/MODEL_CARD.md.
+MODEL_NAME = "infrascan-yolo26s-rdd2022-cmird"
+MODEL_VERSION = "v1"
 
 # Detections below this confidence are dropped. See ml/MODEL_CARD.md for the
 # precision and recall you get at each threshold.
