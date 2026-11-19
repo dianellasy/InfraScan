@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
+from uuid_extensions import uuid7
 
 from sqlalchemy.orm import Session
 
@@ -28,6 +29,7 @@ from inference.geolocation import (
 logger = logging.getLogger(__name__)
 
 EVIDENCE_CONTENT_TYPE = "image/jpeg"
+EVIDENCE_MEDIA_OBJECT_KEY_PREFIX = "/output/upload"
 
 # (image bytes, filename) -> (v0-mvp result JSON, annotated JPEG bytes)
 InferenceRunner = Callable[[bytes, str | None], tuple[Mapping[str, Any], bytes]]
@@ -107,9 +109,10 @@ class InferenceJobProcessor:
 
     Two short transactions: claim the pending job (mark it running), then
     run inference and geolocation with no session open, then save the evidence
-    image, all detections, and the completed status together. Ordinary failures mark the
-    job failed. Retries, duplicate-delivery guarantees, and recovery of
-    stranded jobs are deferred until after the MVP.
+    image to object storage and persist its key, all detections, and the
+    completed status. Ordinary failures mark the job failed. Retries,
+    duplicate-delivery guarantees, and recovery of stranded jobs are deferred
+    until after the MVP.
     """
 
     def __init__(
@@ -118,7 +121,7 @@ class InferenceJobProcessor:
         run_inference: InferenceRunner,
         clock: Callable[[], datetime] = _utc_now,
         *,
-        media_storage: MediaStorageAdapter | None = None,
+        media_storage: MediaStorageAdapter,
         camera_profile: CameraProfile = SAMPLE_CAMERA_PROFILE,
         heading_deg: float = PROTOTYPE_HEADING_DEG,
     ) -> None:
@@ -214,10 +217,6 @@ class InferenceJobProcessor:
 
     def _load_input_media(self, claimed: ClaimedJob) -> bytes:
         if claimed.object_storage_key is not None:
-            if self._media_storage is None:
-                raise RuntimeError(
-                    "Object-backed input media requires a media storage adapter"
-                )
             return self._media_storage.get(claimed.object_storage_key)
         if claimed.image is not None:
             return claimed.image
@@ -230,21 +229,44 @@ class InferenceJobProcessor:
         annotated_jpeg: bytes,
         detected_at: datetime,
     ) -> None:
-        with self._session_factory() as session, session.begin():
-            jobs = InferenceJobRepository(session)
-            job = jobs.get_for_update(job_id)
-            if job is None or job.status != InferenceJobStatus.RUNNING:
-                raise RuntimeError("job is no longer running")
-            evidence = EvidenceMediaRepository(session).add(
-                job_id,
-                data=annotated_jpeg,
-                content_type=EVIDENCE_CONTENT_TYPE,
-                filename=f"annotated-{job_id}.jpg",
+        media_id = uuid7()
+        object_storage_key = f"{EVIDENCE_MEDIA_OBJECT_KEY_PREFIX}/{media_id}"
+        try:
+            self._media_storage.put(
+                annotated_jpeg, object_storage_key, EVIDENCE_CONTENT_TYPE
             )
-            DetectionRecordRepository(session).add_many(
-                job_id, evidence, parsed.detections, detected_at
+        except Exception:
+            self._delete_uploaded_evidence(object_storage_key)
+            raise
+
+        try:
+            with self._session_factory() as session, session.begin():
+                jobs = InferenceJobRepository(session)
+                job = jobs.get_for_update(job_id)
+                if job is None or job.status != InferenceJobStatus.RUNNING:
+                    raise RuntimeError("job is no longer running")
+                evidence = EvidenceMediaRepository(session).add(
+                    job_id,
+                    media_id=media_id,
+                    object_storage_key=object_storage_key,
+                    content_type=EVIDENCE_CONTENT_TYPE,
+                    filename=f"annotated-{job_id}.jpg",
+                )
+                DetectionRecordRepository(session).add_many(
+                    job_id, evidence, parsed.detections, detected_at
+                )
+                jobs.mark_completed(job, parsed.model_version, completed_at=self._clock())
+        except Exception:
+            self._delete_uploaded_evidence(object_storage_key)
+            raise
+
+    def _delete_uploaded_evidence(self, object_storage_key: str) -> None:
+        try:
+            self._media_storage.delete(object_storage_key)
+        except Exception:
+            logger.exception(
+                "Could not delete orphaned evidence media %s", object_storage_key
             )
-            jobs.mark_completed(job, parsed.model_version, completed_at=self._clock())
 
     def _mark_failed(self, job_id: UUID) -> None:
         try:

@@ -37,10 +37,20 @@ class EvidenceMediaRepository:
         self._session = session
 
     def add(
-        self, job_id: UUID, data: bytes, content_type: str, filename: str | None
+        self,
+        job_id: UUID,
+        media_id: UUID,
+        object_storage_key: str,
+        content_type: str,
+        filename: str | None,
     ) -> EvidenceMedia:
         evidence = EvidenceMedia(
-            job_id=job_id, data=data, content_type=content_type, filename=filename
+            media_id=media_id,
+            job_id=job_id,
+            data=None,
+            object_storage_key=object_storage_key,
+            content_type=content_type,
+            filename=filename,
         )
         self._session.add(evidence)
         self._session.flush()

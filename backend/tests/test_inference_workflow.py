@@ -346,7 +346,10 @@ def test_worker_persists_detections_with_shared_evidence_and_exact_values(
         return copy.deepcopy(v0_output), ANNOTATED_JPEG
 
     clock = StepClock()
-    status = InferenceJobProcessor(session_factory, runner, clock=clock).process(job_id)
+    media_storage = InMemoryMediaStorage()
+    status = InferenceJobProcessor(
+        session_factory, runner, clock=clock, media_storage=media_storage
+    ).process(job_id)
 
     assert status == InferenceJobStatus.COMPLETED
     assert seen_inputs == [(image, "road.jpg")]
@@ -362,8 +365,12 @@ def test_worker_persists_detections_with_shared_evidence_and_exact_values(
 
         assert len(job.evidence_media) == 1
         evidence = job.evidence_media[0]
-        assert evidence.data == ANNOTATED_JPEG
+        assert evidence.data is None
         assert evidence.content_type == "image/jpeg"
+        expected_key = f"/output/upload/{evidence.media_id}"
+        assert evidence.object_storage_key == expected_key
+        assert media_storage.puts == [expected_key]
+        assert media_storage.objects[expected_key] == (ANNOTATED_JPEG, "image/jpeg")
 
         records = sorted(job.detection_records, key=lambda r: r.confidence, reverse=True)
         expected = v0_output["detections"]
@@ -404,7 +411,9 @@ def test_worker_runs_inference_after_committing_running_state(
             )
         return v0_output, ANNOTATED_JPEG
 
-    InferenceJobProcessor(session_factory, runner).process(job_id)
+    InferenceJobProcessor(
+        session_factory, runner, media_storage=InMemoryMediaStorage()
+    ).process(job_id)
 
     assert observed["status"] == "running"
     assert observed["started_at"] is not None
@@ -418,7 +427,9 @@ def test_zero_detection_inference_completes_with_no_records(
     empty_output = {**v0_output, "detections": []}
 
     status = InferenceJobProcessor(
-        session_factory, lambda image, name: (empty_output, ANNOTATED_JPEG)
+        session_factory,
+        lambda image, name: (empty_output, ANNOTATED_JPEG),
+        media_storage=InMemoryMediaStorage(),
     ).process(job_id)
 
     assert status == InferenceJobStatus.COMPLETED
@@ -440,7 +451,9 @@ def test_inference_failure_marks_job_failed_and_logs_job_id(
         raise RuntimeError("model crashed")
 
     with caplog.at_level(logging.ERROR):
-        status = InferenceJobProcessor(session_factory, runner).process(job_id)
+        status = InferenceJobProcessor(
+            session_factory, runner, media_storage=InMemoryMediaStorage()
+        ).process(job_id)
 
     assert status == InferenceJobStatus.FAILED
     assert any(str(job_id) in r.getMessage() and r.exc_info for r in caplog.records)
@@ -461,7 +474,11 @@ def test_malformed_model_output_marks_job_failed(
     bad = copy.deepcopy(v0_output)
     bad["detections"][2]["bbox_xyxy"] = [1.0, 2.0, 3.0]
 
-    status = InferenceJobProcessor(session_factory, lambda i, n: (bad, ANNOTATED_JPEG)).process(job_id)
+    status = InferenceJobProcessor(
+        session_factory,
+        lambda i, n: (bad, ANNOTATED_JPEG),
+        media_storage=InMemoryMediaStorage(),
+    ).process(job_id)
 
     assert status == InferenceJobStatus.FAILED
     assert count_rows(session_factory, DetectionRecord) == 0
@@ -479,13 +496,41 @@ def test_result_persistence_failure_rolls_back_all_outputs(
 
     monkeypatch.setattr(DetectionRecordRepository, "add_many", fail)
 
+    media_storage = InMemoryMediaStorage()
     status = InferenceJobProcessor(
-        session_factory, lambda i, n: (v0_output, ANNOTATED_JPEG)
+        session_factory,
+        lambda i, n: (v0_output, ANNOTATED_JPEG),
+        media_storage=media_storage,
     ).process(job_id)
 
     assert status == InferenceJobStatus.FAILED
-    # The evidence row was flushed in the same transaction and must be gone.
+    # The evidence row and uploaded object must both be cleaned up.
     assert count_rows(session_factory, EvidenceMedia) == 0
+    assert media_storage.objects == {}
+    assert media_storage.deletes == media_storage.puts
+    with session_factory() as session:
+        job = session.get(InferenceJob, job_id)
+        assert job.status == "failed"
+        assert job.model_version is None
+
+
+def test_evidence_upload_failure_does_not_persist_outputs(
+    session_factory: sessionmaker[Session], v0_output: dict
+) -> None:
+    job_id = create_pending_job(session_factory)
+    media_storage = InMemoryMediaStorage(ConnectionError("R2 unavailable"))
+
+    status = InferenceJobProcessor(
+        session_factory,
+        lambda i, n: (v0_output, ANNOTATED_JPEG),
+        media_storage=media_storage,
+    ).process(job_id)
+
+    assert status == InferenceJobStatus.FAILED
+    assert count_rows(session_factory, EvidenceMedia) == 0
+    assert count_rows(session_factory, DetectionRecord) == 0
+    assert media_storage.objects == {}
+    assert media_storage.deletes == media_storage.puts
     with session_factory() as session:
         job = session.get(InferenceJob, job_id)
         assert job.status == "failed"
@@ -499,7 +544,9 @@ def test_missing_or_invalid_prediction_dimensions_fail_without_outputs(
     job_id = create_pending_job(session_factory)
     result = {**v0_output, "image_width": width}
     status = InferenceJobProcessor(
-        session_factory, lambda i, n: (result, ANNOTATED_JPEG)
+        session_factory,
+        lambda i, n: (result, ANNOTATED_JPEG),
+        media_storage=InMemoryMediaStorage(),
     ).process(job_id)
     assert status == InferenceJobStatus.FAILED
     assert count_rows(session_factory, DetectionRecord) == 0
@@ -517,6 +564,7 @@ def test_worker_uses_injected_camera_and_heading(
     job_id = create_pending_job(session_factory)
     status = InferenceJobProcessor(
         session_factory, lambda i, n: (result, ANNOTATED_JPEG),
+        media_storage=InMemoryMediaStorage(),
         camera_profile=profile, heading_deg=90,
     ).process(job_id)
     assert status == InferenceJobStatus.COMPLETED
@@ -543,7 +591,9 @@ def test_worker_skips_unknown_and_non_pending_jobs(
         calls.append(name)
         return v0_output, ANNOTATED_JPEG
 
-    processor = InferenceJobProcessor(session_factory, runner)
+    processor = InferenceJobProcessor(
+        session_factory, runner, media_storage=InMemoryMediaStorage()
+    )
     assert processor.process(uuid4()) is None
 
     job_id = create_pending_job(session_factory)
@@ -632,7 +682,9 @@ def test_successful_zero_detection_job_lists_empty_page(
 ) -> None:
     job_id = create_pending_job(session_factory)
     InferenceJobProcessor(
-        session_factory, lambda i, n: ({**v0_output, "detections": []}, ANNOTATED_JPEG)
+        session_factory,
+        lambda i, n: ({**v0_output, "detections": []}, ANNOTATED_JPEG),
+        media_storage=InMemoryMediaStorage(),
     ).process(job_id)
 
     with build_client(

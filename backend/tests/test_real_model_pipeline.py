@@ -203,6 +203,11 @@ def test_http_to_celery_worker_to_database_with_real_model(
             assert row.bounding_box == pytest.approx(detection["bbox_xyxy"], abs=0.5)
             assert row.confidence == pytest.approx(detection["confidence"], abs=1e-3)
         assert [r.severity for r in rows] == [d["severity"] for d in expected["detections"]]
-        with Image.open(BytesIO(stored.evidence_media[0].data)) as evidence:
+        evidence_row = stored.evidence_media[0]
+        assert evidence_row.data is None
+        assert evidence_row.object_storage_key == f"/output/upload/{evidence_row.media_id}"
+        with Image.open(
+            BytesIO(media_storage.objects[evidence_row.object_storage_key])
+        ) as evidence:
             assert evidence.format == "JPEG"
             assert evidence.size == Image.open(BytesIO(image)).size
