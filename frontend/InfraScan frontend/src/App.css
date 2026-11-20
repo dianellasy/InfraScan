@@ -460,3 +460,209 @@ footer {
     grid-template-columns: 1fr;
   }
 }
+
+/*========== PAGE NAVIGATION ==========*/
+
+.page-navigation {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  margin-top: 24px;
+  margin-bottom: 16px;
+}
+
+/* Shared appearance for navigation buttons */
+.navigation-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+
+  border: 1px solid #d8e0e8;
+  border-radius: 8px;
+
+  background-color: white;
+  color: #255da7;
+
+  font-size: 14px;
+  font-weight: 600;
+
+  cursor: pointer;
+
+  transition: background-color 0.2s ease;
+}
+
+/* Changes the button background when hovering */
+.navigation-button:hover {
+  background: var(--muted);
+}
+
+/* Make keyboard navigation more accessible */
+.navigation-button:focus-visible {
+  outline: 3px solid #255da7;
+  outline-offset: 2px;
+}
+
+/*========== INFRASCAN LOGIN PAGE ==========*/
+
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: #f5f8f7;
+}
+
+/* Main login card */
+.login-card {
+  width: 100%;
+  max-width: 400px;
+  padding: 40px;
+  background: white;
+  border: 1px solid #e0e7e4;
+  border-radius: 16px;
+  box-shadow: 0 12px 35px rgb(20, 40, 35, 0.06);
+}
+
+/* Logo and project name*/
+.login-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 32px;
+}
+
+.login-brand img {
+  width: 42px;
+  height: 42px;
+}
+
+.login-brand h1 {
+  margin: 0;
+  font-size: 28px;
+}
+
+/* Heading and supporting text */
+.login-card h2 {
+  margin: 0 0 10px;
+  font-size: 26px;
+}
+
+.login-heading p {
+  color: #718079;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Form fields */
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.login-field label {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.login-field input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 13px 14px;
+  border: 1px solid #d8e0e8;
+  border-radius: 8px;
+  font-size: 15px;
+  background: white;
+  color: #1c2a25;
+}
+
+.login-field input:focus {
+  outline: 2px solid #2860ad;
+  outline-offset: 1px;
+}
+
+/* Login Submitbutton */
+.login-submit {
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: 8px;
+  background: #285fa9;
+  color: white;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Validation error message */
+.login-error {
+  margin-bottom: 16px;
+  color: #b42318;
+  font-size: 14px;
+}
+
+/* Prototype disclosure */
+.login-demo-note {
+  margin: 20px 0 0;
+  text-align: center;
+  color: #718079;
+  font-size: 12px;
+}
+
+@media (max-width: 480px) {
+  .login-card {
+    padding: 26px;
+  }
+}
+
+/*========== INFRASCAN WORKSPACE PAGE ==========*/
+.workspace-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  margin-bottom: 32px;
+  padding-bottom: 20px;
+
+  border-bottom: 1px solid #dce4e0;
+}
+
+.workspace-label {
+  font-weight: 700;
+  font-size: 16px;
+  color: #1c2a25;
+}
+
+/*========== LOGOUT BUTTON ==========*/
+.logout-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background-color: white;
+  color: #255da7;
+  
+  border: 1px solid #d8e0e8;
+  border-radius: 8px;
+
+  font-size: 14px;
+  font-weight: 600;
+
+  cursor: pointer;
+}
+
+/* Change background when hovered. */
+.logout-button:hover {
+  background-color: #eaf2ff;
+}
+
+/* Make keyboard navigation visible. */
+.logout-button:focus-visible {
+  outline: 3px solid #255da7;
+  outline-offset: 2px;
+}

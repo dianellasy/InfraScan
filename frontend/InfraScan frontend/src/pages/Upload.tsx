@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { useNavigate} from "react-router-dom";
 import { endpoints } from "../api/endpoints.ts";
 import infrascanLogo from "../assets/infrascan.svg";
 import "../App.css";
@@ -72,7 +73,9 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 function Upload() {
-    const [file, setFile] = useState<File | null>(null);
+  // creates a navigate function to redirect user to another page
+  const navigate = useNavigate();
+  const [file, setFile] = useState<File | null>(null);
   const [capturedAt, setCapturedAt] = useState("");
   const [latitude, setLatitude] = useState("");
   const [longitude, setLongitude] = useState("");
@@ -223,6 +226,31 @@ function Upload() {
         </a>
         <span className="topbar-note">Road infrastructure inspection</span>
       </header>
+
+      {/* Navigation controls to move bw pages. */}
+      <nav className="page-navigation" aria-label="Page navigation">
+        
+        {/* navigate (-1) returns to the previous page */}
+        <button
+          type="button"
+          className="navigation-button"
+          onClick={() => navigate(-1)}
+        >
+          <span aria-hidden="true">←</span>
+          Back
+        </button>
+
+        {/* navigate("/overview") always returns to the overview page */}
+        <button
+          type="button"
+          className="navigation-button"
+          onClick={() => navigate("/overview")}
+        >
+          <span aria-hidden="true">→</span>
+          Overview
+        </button>
+
+      </nav>
 
       <section className="intro">
         <p className="eyebrow">IMAGE ANALYSIS</p>
