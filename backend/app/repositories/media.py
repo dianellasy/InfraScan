@@ -8,25 +8,13 @@ from app.models import EvidenceMedia, InputMedia
 
 
 class InputMediaRepository:
-    """PostgreSQL metadata for validated uploads stored in object storage."""
+    """PostgreSQL binary storage for validated uploads (`MediaStorageAdapter`)."""
 
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def store(
-        self,
-        media_id: UUID,
-        object_storage_key: str,
-        content_type: str,
-        filename: str | None,
-    ) -> InputMedia:
-        media = InputMedia(
-            media_id=media_id,
-            data=None,
-            object_storage_key=object_storage_key,
-            content_type=content_type,
-            filename=filename,
-        )
+    def store(self, data: bytes, content_type: str, filename: str | None) -> InputMedia:
+        media = InputMedia(data=data, content_type=content_type, filename=filename)
         self._session.add(media)
         self._session.flush()
         return media
@@ -37,22 +25,10 @@ class EvidenceMediaRepository:
         self._session = session
 
     def add(
-        self,
-        job_id: UUID,
-        media_id: UUID,
-        object_storage_key: str,
-        content_type: str,
-        filename: str | None,
-        frame_timestamp: float | None = None,
+        self, job_id: UUID, data: bytes, content_type: str, filename: str | None
     ) -> EvidenceMedia:
         evidence = EvidenceMedia(
-            frame_timestamp=frame_timestamp,
-            media_id=media_id,
-            job_id=job_id,
-            data=None,
-            object_storage_key=object_storage_key,
-            content_type=content_type,
-            filename=filename,
+            job_id=job_id, data=data, content_type=content_type, filename=filename
         )
         self._session.add(evidence)
         self._session.flush()

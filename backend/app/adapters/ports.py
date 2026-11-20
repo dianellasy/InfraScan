@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, BinaryIO, Protocol, Sequence
+from typing import TYPE_CHECKING, Protocol, Sequence
 from uuid import UUID
 
 from app.schemas import (
@@ -30,9 +30,6 @@ class StoredMedia(Protocol):
 
 
 class MediaStorageAdapter(Protocol):
-    def put_file(self, source: BinaryIO, key: str, content_type: str) -> None: ...
-    def download_to(self, key: str, target: BinaryIO, max_bytes: int) -> None: ...
-
     def put(
       self, data: bytes, object_key: str, content_type: str
     ) -> None:

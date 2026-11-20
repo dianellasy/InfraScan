@@ -8,9 +8,6 @@ Huy | Nov 10| [geolocation_method_update](#4-integrating-geolocation-method)
 Huy | Nov 10| [frontend-backend_contracts](#5-frontend-backend-contracts)
 Huy | Nov 11| [ORM_updates_and_prelim_migration](#6-orm-updates-and-prelim-db-migration)
 Huy | Nov 12| [e2e_inference_service_update](#7-end-to-end-inference-submission-update)
-HUY | Nov 16| [geolocation_integration_update](#8-geolocation-module-update)
-HUY | Nov 18| [r2_storage_migration](#9-r2-storage-migration)
-
 
 
 ## 1. docker and component set up 
@@ -116,8 +113,5 @@ Current pipeline now include geolocation results. Next will work on video suppor
 Currently working to migrate all media storage to an object storage. We will use cloudflare R2 and then transition to S3 later when the team got a chance to create the aws resource
 - task:
     - 1) upload (DONE)
-    - 2) download (DONE)
-    - 3) delete (DONE)
-
-Pipeline is now commiting images to R2. Removed BYTEA storage on postgres for both media_input and evidence_media 
-
+    - 2) download
+    - 3) delete 

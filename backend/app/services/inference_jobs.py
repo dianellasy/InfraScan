@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, BinaryIO, NoReturn
+from typing import Any, NoReturn
 from uuid import UUID
 
 from fastapi import UploadFile
@@ -11,9 +11,8 @@ from sqlalchemy.exc import InterfaceError, OperationalError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
-from uuid_extensions import uuid7
 
-from app.adapters.ports import InferenceQueueAdapter, MediaStorageAdapter
+from app.adapters.ports import InferenceQueueAdapter
 from app.models import DetectionRecord, InferenceJob
 from app.repositories import (
     DetectionRecordRepository,
@@ -40,7 +39,6 @@ logger = logging.getLogger(__name__)
 # The controller has already verified the bytes decode as JPEG, so store the
 # verified type rather than the client-declared one.
 SUBMITTED_CONTENT_TYPE = "image/jpeg"
-INPUT_MEDIA_OBJECT_KEY_PREFIX = "/input/upload"
 
 _DATABASE_UNAVAILABLE_ERRORS = (OperationalError, InterfaceError, PoolTimeoutError)
 
@@ -101,55 +99,31 @@ class DatabaseInfraScanService:
         self,
         session_factory: Callable[[], Session],
         queue: InferenceQueueAdapter,
-        media_storage: MediaStorageAdapter,
     ) -> None:
         self._session_factory = session_factory
         self._queue = queue
-        self._media_storage = media_storage
 
     async def submit_inference(
         self, file: UploadFile, metadata: InferenceSubmissionMetadata
     ) -> InferenceJobAccepted:
         await file.seek(0)
-        if file.content_type == "video/mp4":
-            accepted = await run_in_threadpool(
-                self._create_pending_job, file.file, file.filename, metadata, "video/mp4"
-            )
-        else:
-            data = await file.read()
-            accepted = await run_in_threadpool(
-                self._create_pending_job, data, file.filename, metadata
-            )
+        data = await file.read()
+        accepted = await run_in_threadpool(
+            self._create_pending_job, data, file.filename, metadata
+        )
         await run_in_threadpool(self._publish, accepted.job_id)
         return accepted
 
     def _create_pending_job(
         self,
-        data: bytes | BinaryIO,
+        data: bytes,
         filename: str | None,
         metadata: InferenceSubmissionMetadata,
-        content_type: str = SUBMITTED_CONTENT_TYPE,
     ) -> InferenceJobAccepted:
-        media_id = uuid7()
-        object_storage_key = (f"videos/input/{media_id}.mp4" if content_type == "video/mp4"
-                              else f"{INPUT_MEDIA_OBJECT_KEY_PREFIX}/{media_id}")
-        try:
-            if content_type == "video/mp4":
-                self._media_storage.put_file(data, object_storage_key, content_type)
-            else:
-                self._media_storage.put(data, object_storage_key, content_type)
-        except Exception as exc:
-            logger.exception("Could not store input media %s in object storage", media_id)
-            self._delete_uploaded_media(object_storage_key)
-            raise SubmissionDependencyUnavailableError from exc
-
         try:
             with self._session_factory() as session, session.begin():
                 media = InputMediaRepository(session).store(
-                    media_id,
-                    object_storage_key,
-                    content_type,
-                    filename,
+                    data, SUBMITTED_CONTENT_TYPE, filename
                 )
                 job = InferenceJobRepository(session).create_pending(media, metadata)
                 accepted = InferenceJobAccepted(
@@ -159,20 +133,8 @@ class DatabaseInfraScanService:
                 )
         except _DATABASE_UNAVAILABLE_ERRORS as exc:
             logger.exception("Could not persist inference submission")
-            self._delete_uploaded_media(object_storage_key)
             raise SubmissionDependencyUnavailableError from exc
-        except Exception:
-            self._delete_uploaded_media(object_storage_key)
-            raise
         return accepted
-
-    def _delete_uploaded_media(self, object_storage_key: str) -> None:
-        try:
-            self._media_storage.delete(object_storage_key)
-        except Exception:
-            logger.exception(
-                "Could not delete orphaned input media %s", object_storage_key
-            )
 
     def _publish(self, job_id: UUID) -> None:
         try:
