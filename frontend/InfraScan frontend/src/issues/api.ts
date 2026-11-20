@@ -72,7 +72,16 @@ export function buildIssueMapUrl(
 }
 
 export function fetchIssueMap(url: string, signal?: AbortSignal) {
-  return request<IssueFeatureCollection>(url, { signal });
+  // Never reuse a cached response: new jobs keep adding and updating Issues.
+  return request<IssueFeatureCollection>(url, { signal, cache: "no-store" });
+}
+
+/** Issues supported by at least one detection from `jobId` (located and unlocated). */
+export function fetchJobIssues(jobId: string, signal?: AbortSignal) {
+  const url = new URL(endpoints.issues.url);
+  url.searchParams.set("job_id", jobId);
+  url.searchParams.set("page_size", "100");
+  return request<Page<Issue>>(url.toString(), { signal, cache: "no-store" });
 }
 
 export function fetchIssue(issueId: string, signal?: AbortSignal) {

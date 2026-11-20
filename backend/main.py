@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.adapters.celery_queue import CeleryInferenceQueue
+from app.adapters.r2_storage import R2MediaStorageAdapter
 from app.api.errors import register_exception_handlers
 from app.api.upload_limit import UploadLimitMiddleware
 from app.api.v1.router import api_router
@@ -26,9 +27,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         return
 
     engine = create_db_engine()
+    try:
+        media_storage = R2MediaStorageAdapter()
+    except KeyError as exc:
+        # Reads of legacy rows still work; submissions return 503 until fixed.
+        logger.error("Object storage is not configured: missing %s", exc.args[0])
+        media_storage = None
     app.state.infrascan_service = DatabaseInfraScanService(
         create_session_factory(engine),
         CeleryInferenceQueue(celery_app),
+        media_storage,
     )
     try:
         yield

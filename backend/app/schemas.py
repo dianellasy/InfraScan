@@ -73,6 +73,40 @@ class InferenceSubmissionMetadata(BaseModel):
         return float(value)
 
 
+MIN_CAMERA_UTC_OFFSET_MINUTES = -720
+MAX_CAMERA_UTC_OFFSET_MINUTES = 840
+
+
+class VideoSubmissionMetadata(BaseModel):
+    """Client metadata for an A119 Mini 2 MP4; time and place come from its GPS."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    camera_utc_offset_minutes: int = Field(
+        ge=MIN_CAMERA_UTC_OFFSET_MINUTES,
+        le=MAX_CAMERA_UTC_OFFSET_MINUTES,
+        description=(
+            "The dashcam's configured time-zone offset from UTC in minutes, "
+            "for example -480 for UTC-08:00. Must be a multiple of 15."
+        ),
+    )
+
+    @field_validator("camera_utc_offset_minutes", mode="before")
+    @classmethod
+    def validate_offset(cls, value: object) -> int:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("camera_utc_offset_minutes must be a JSON integer")
+        if value % 15:
+            raise ValueError("camera_utc_offset_minutes must be a multiple of 15")
+        return value
+
+
+class ResolvedVideoSubmission(InferenceSubmissionMetadata):
+    """Server-derived job metadata for a validated MP4: the first valid GPS fix."""
+
+    camera_utc_offset_minutes: int
+
+
 class InferenceJobAccepted(BaseModel):
     job_id: UUID
     status: Literal["pending"]
@@ -150,6 +184,10 @@ class IssueFilters(BaseModel):
     review_required: bool = False
     last_seen_after: AwareDatetime | None = None
     last_seen_before: AwareDatetime | None = None
+    job_id: UUID | None = Field(
+        default=None,
+        description="Only Issues supported by at least one detection from this inference job.",
+    )
 
     @model_validator(mode="after")
     def validate_last_seen_range(self) -> Self:
@@ -285,8 +323,21 @@ class DetectionDTO(BaseModel):
     confidence: float = Field(ge=0, le=1)
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
-    detected_at: datetime
-    issue_id: UUID | None = None
+    detected_at: datetime = Field(description="When inference finished.")
+    observed_at: datetime | None = Field(
+        default=None,
+        description=(
+            "When the source image or video frame was captured (UTC); NULL only for "
+            "historical video detections whose frame time is unknown."
+        ),
+    )
+    issue_id: UUID | None = Field(
+        default=None,
+        description=(
+            "The canonical Issue this detection supports; NULL for an unmapped "
+            "model class or a historical row that has not been backfilled."
+        ),
+    )
     # Raw v0-mvp model class ID as predicted, not a canonical issue type.
     issue_type: int | None = None
     predicted_issue_type_code: str | None = None

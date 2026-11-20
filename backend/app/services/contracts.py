@@ -24,7 +24,7 @@ from app.schemas import (
     RoadConditionDTO,
     RoadDTO,
 )
-from app.services.issues import EvidenceImage
+from app.services.issues import EvidenceImage, EvidenceUnavailableError  # noqa: F401
 
 
 class SubmissionDependencyUnavailableError(Exception):

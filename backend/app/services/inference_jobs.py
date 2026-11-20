@@ -3,8 +3,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, NoReturn
-from uuid import UUID
+from typing import Any, BinaryIO, NoReturn
+from uuid import UUID, uuid4
 
 from fastapi import UploadFile
 from sqlalchemy.exc import InterfaceError, OperationalError
@@ -12,7 +12,7 @@ from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from app.adapters.ports import InferenceQueueAdapter
+from app.adapters.ports import InferenceQueueAdapter, MediaStorageAdapter
 from app.models import InferenceJob
 from app.repositories import (
     DetectionRecordRepository,
@@ -30,6 +30,7 @@ from app.schemas import (
     IssueFeatureCollection,
     IssueFilters,
     Page,
+    ResolvedVideoSubmission,
 )
 from app.services.contracts import (
     EvidenceNotFoundError,
@@ -39,14 +40,16 @@ from app.services.contracts import (
 )
 from app.services.dto import detection_to_dto
 from app.services.issues import EvidenceImage, IssueQueries
+from app.services.object_keys import input_media_key
 
 __all__ = ["DatabaseInfraScanService", "detection_to_dto", "job_to_dto"]
 
 logger = logging.getLogger(__name__)
 
-# The controller has already verified the bytes decode as JPEG, so store the
-# verified type rather than the client-declared one.
-SUBMITTED_CONTENT_TYPE = "image/jpeg"
+# The controller verified the bytes, so store the detected type rather than
+# the client-declared one.
+IMAGE_CONTENT_TYPE = "image/jpeg"
+VIDEO_CONTENT_TYPE = "video/mp4"
 
 _DATABASE_UNAVAILABLE_ERRORS = (OperationalError, InterfaceError, PoolTimeoutError)
 
@@ -83,32 +86,75 @@ class DatabaseInfraScanService:
         self,
         session_factory: Callable[[], Session],
         queue: InferenceQueueAdapter,
+        media_storage: MediaStorageAdapter | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._queue = queue
-        self._issues = IssueQueries(session_factory)
+        self._media_storage = media_storage
+        self._issues = IssueQueries(session_factory, media_storage)
 
     async def submit_inference(
         self, file: UploadFile, metadata: InferenceSubmissionMetadata
     ) -> InferenceJobAccepted:
+        """Upload to object storage, commit the job, then publish its ID."""
+        if self._media_storage is None:
+            logger.error("Object storage is not configured; rejecting submission")
+            raise SubmissionDependencyUnavailableError
+        is_video = isinstance(metadata, ResolvedVideoSubmission)
+        content_type = VIDEO_CONTENT_TYPE if is_video else IMAGE_CONTENT_TYPE
+        media_id = uuid4()
+        key = input_media_key(media_id, content_type)
+
         await file.seek(0)
-        data = await file.read()
+        if is_video:
+            # Streamed from the spooled upload; never read into memory.
+            await run_in_threadpool(self._upload, key, content_type, file.file, None)
+        else:
+            # Validation already bounded JPEGs to 5,000,000 bytes.
+            data = await file.read()
+            await run_in_threadpool(self._upload, key, content_type, None, data)
         accepted = await run_in_threadpool(
-            self._create_pending_job, data, file.filename, metadata
+            self._create_pending_job, media_id, key, content_type, file.filename, metadata
         )
         await run_in_threadpool(self._publish, accepted.job_id)
         return accepted
 
+    def _upload(
+        self, key: str, content_type: str, source: BinaryIO | None, data: bytes | None
+    ) -> None:
+        try:
+            if source is not None:
+                self._media_storage.put_file(source, key, content_type)
+            else:
+                self._media_storage.put(data, key, content_type)
+        except Exception as exc:
+            logger.exception("Could not upload input media %s", key)
+            # A failed multipart upload can leave a partial object behind.
+            self._delete_object(key)
+            raise SubmissionDependencyUnavailableError from exc
+
+    def _delete_object(self, key: str, job_id: UUID | None = None) -> None:
+        try:
+            self._media_storage.delete(key)
+        except Exception:
+            logger.exception("Could not delete object %s (job %s)", key, job_id)
+
     def _create_pending_job(
         self,
-        data: bytes,
+        media_id: UUID,
+        key: str,
+        content_type: str,
         filename: str | None,
         metadata: InferenceSubmissionMetadata,
     ) -> InferenceJobAccepted:
         try:
             with self._session_factory() as session, session.begin():
                 media = InputMediaRepository(session).store(
-                    data, SUBMITTED_CONTENT_TYPE, filename
+                    None,
+                    content_type,
+                    filename,
+                    media_id=media_id,
+                    object_storage_key=key,
                 )
                 job = InferenceJobRepository(session).create_pending(media, metadata)
                 accepted = InferenceJobAccepted(
@@ -118,7 +164,11 @@ class DatabaseInfraScanService:
                 )
         except _DATABASE_UNAVAILABLE_ERRORS as exc:
             logger.exception("Could not persist inference submission")
+            self._delete_object(key)
             raise SubmissionDependencyUnavailableError from exc
+        except BaseException:
+            self._delete_object(key)
+            raise
         return accepted
 
     def _publish(self, job_id: UUID) -> None:

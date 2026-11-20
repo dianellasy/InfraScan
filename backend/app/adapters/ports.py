@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Protocol, Sequence
+from typing import TYPE_CHECKING, BinaryIO, Protocol, Sequence
 from uuid import UUID
 
 from app.schemas import (
@@ -30,17 +30,26 @@ class StoredMedia(Protocol):
 
 
 class MediaStorageAdapter(Protocol):
-    def put(
-      self, data: bytes, object_key: str, content_type: str
-    ) -> None:
-        """Store the image to R2 location using object_key """
+    """Object storage for media payloads. Keys never start with "/"."""
+
+    def put(self, data: bytes, object_key: str, content_type: str) -> None:
+        """Store a small, already-bounded payload such as a JPEG."""
         ...
+
+    def put_file(self, source: BinaryIO, object_key: str, content_type: str) -> None:
+        """Stream a seekable file to storage from its start (multipart when large)."""
+        ...
+
     def get(self, key: str) -> bytes:
-        """Using the key, find and return the image"""
+        """Return a small object such as a JPEG; implementations cap the size."""
+        ...
+
+    def download_to_file(self, key: str, target: BinaryIO, max_bytes: int) -> int:
+        """Stream an object into `target`; fail before writing past `max_bytes`."""
         ...
 
     def delete(self, key: str) -> None:
-        """Using the key, find and delete the image"""
+        """Delete an object; deleting a missing key is not an error."""
         ...
 
 class InferenceJobRepositoryAdapter(Protocol):

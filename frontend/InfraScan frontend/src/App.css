@@ -240,7 +240,20 @@
   font-size: 0.8rem;
 }
 
-.field-grid input {
+.video-note,
+.field-hint {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.field-hint {
+  margin-top: 8px;
+  font-size: 0.8rem;
+}
+
+.field-grid input,
+.field-grid select {
   width: 100%;
   min-width: 0;
   padding: 9px 10px;
@@ -360,6 +373,25 @@
 
 .results-panel {
   margin-top: 18px;
+}
+
+.job-issues-summary {
+  margin: 0 0 14px;
+  color: var(--muted);
+}
+
+.job-issue-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.job-issue-actions .primary-button {
+  width: auto;
+  margin-top: 0;
+  text-decoration: none;
 }
 
 .table-scroll {

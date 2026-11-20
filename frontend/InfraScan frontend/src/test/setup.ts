@@ -4,6 +4,7 @@ import { afterEach, vi } from "vitest";
 
 afterEach(() => {
   cleanup();
+  window.location.hash = "";
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();

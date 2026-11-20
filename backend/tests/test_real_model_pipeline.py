@@ -207,7 +207,7 @@ def test_http_to_celery_worker_to_database_with_real_model(
         assert [r.severity for r in rows] == [d["severity"] for d in expected["detections"]]
         evidence_row = stored.evidence_media[0]
         assert evidence_row.data is None
-        assert evidence_row.object_storage_key == f"/output/upload/{evidence_row.media_id}"
+        assert evidence_row.object_storage_key == f"evidence/{job_id}/{evidence_row.media_id}.jpg"
         with Image.open(
             BytesIO(media_storage.objects[evidence_row.object_storage_key])
         ) as evidence:

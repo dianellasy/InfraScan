@@ -29,8 +29,12 @@ export function moveFakeMap(bounds: ViewportBounds) {
   fakeMap.handlers.moveend?.({ target: fakeMap } as never);
 }
 
-export function MapContainer({ children }: { children: ReactNode }) {
-  return <div data-testid="map">{children}</div>;
+export function MapContainer({ children, bounds }: { children: ReactNode; bounds?: unknown }) {
+  return (
+    <div data-testid="map" data-bounds={JSON.stringify(bounds)}>
+      {children}
+    </div>
+  );
 }
 
 export function TileLayer({ url, attribution }: { url: string; attribution: string }) {

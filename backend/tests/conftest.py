@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db import create_db_engine, create_session_factory
+from a119_seed_support import generate_seed
 from postgres_support import disposable_postgres, run_alembic
 
 # `issue_types` is reference data inserted by its migration, so it is not truncated.
@@ -36,6 +38,20 @@ def migrated_engine() -> Iterator[sa.Engine]:
             yield engine
         finally:
             engine.dispose()
+
+
+@pytest.fixture(scope="session")
+def a119_seed(tmp_path_factory: pytest.TempPathFactory) -> Callable[..., tuple[Path, dict]]:
+    """Build (and cache per session) a synthetic seed clip; tests must not modify it."""
+    cache: dict[tuple, tuple[Path, dict]] = {}
+
+    def make(scenario: str = "standard", **options) -> tuple[Path, dict]:
+        key = (scenario, tuple(sorted(options.items())))
+        if key not in cache:
+            cache[key] = generate_seed(tmp_path_factory.mktemp("a119"), scenario, **options)
+        return cache[key]
+
+    return make
 
 
 @pytest.fixture

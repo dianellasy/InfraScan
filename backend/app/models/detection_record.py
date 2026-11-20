@@ -71,8 +71,13 @@ class DetectionRecord(Base):
     `inference/labels.py`), preserved as predicted so classification conflicts
     within an Issue stay visible. `MODEL_CLASS_ISSUE_TYPES` maps it to a
     canonical issue type; it deliberately has no foreign key. `issue_id` links
-    the detection to the canonical Issue it supports, or is NULL when the
-    detection has not been assigned to one yet.
+    the detection to the canonical Issue it supports (see
+    `app.services.issue_linking`); it is NULL only for unmapped model classes
+    and for historical rows that have not been backfilled.
+
+    `observed_at` is when the source image or video frame was captured (UTC),
+    while `detected_at` is when inference finished. `observed_at` is NULL only
+    for historical video rows whose frame time cannot be reconstructed.
 
     `bounding_box` is `[x1, y1, x2, y2]` in pixels of the prediction source
     image at its original dimensions (not normalized YOLO coordinates and not
@@ -149,6 +154,10 @@ class DetectionRecord(Base):
     detected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
+    )
+    observed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
     )
 
     job: Mapped[InferenceJob] = relationship(

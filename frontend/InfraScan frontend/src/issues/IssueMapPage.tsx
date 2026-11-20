@@ -10,25 +10,57 @@ import { useIssueMap } from "./useIssueMap.ts";
 import type { IssueFeature, IssueFilters, ViewportBounds } from "./types.ts";
 import "./issues.css";
 
-const INITIAL_BOUNDS: LatLngTuple[] = STANTON_ANAHEIM_ROUTE.map(([lat, lon]) => [lat, lon]);
+const DEFAULT_BOUNDS: LatLngTuple[] = STANTON_ANAHEIM_ROUTE.map(([lat, lon]) => [lat, lon]);
 
-export function IssueMapPage({ debounceMs = VIEWPORT_DEBOUNCE_MS }: { debounceMs?: number }) {
+type IssueMapPageProps = {
+  debounceMs?: number;
+  /** Area to show first (for example, around a job's Issues); defaults to the seed route. */
+  initialBounds?: ViewportBounds;
+  /** Issue to select once the map has loaded it. */
+  focusIssueId?: string;
+};
+
+export function IssueMapPage({
+  debounceMs = VIEWPORT_DEBOUNCE_MS,
+  initialBounds,
+  focusIssueId,
+}: IssueMapPageProps) {
   const [viewport, setViewport] = useState<ViewportBounds | null>(null);
   const [filters, setFilters] = useState<IssueFilters>(EMPTY_FILTERS);
   const [selected, setSelected] = useState<IssueFeature | null>(null);
+  const [focusPending, setFocusPending] = useState(focusIssueId !== undefined);
 
+  const mapBounds = useMemo<LatLngTuple[]>(
+    () =>
+      initialBounds
+        ? [
+            [initialBounds.south, initialBounds.west],
+            [initialBounds.north, initialBounds.east],
+          ]
+        : DEFAULT_BOUNDS,
+    [initialBounds],
+  );
   const requestFilters = useMemo(
     () => (isDateRangeValid(filters) ? filters : { ...filters, lastSeenFrom: "", lastSeenTo: "" }),
     [filters],
   );
   const { status, data, error, retry } = useIssueMap(viewport, requestFilters, debounceMs);
   const features = useMemo(() => data?.features ?? [], [data]);
+  const shown =
+    selected ??
+    (focusPending ? (features.find((feature) => feature.id === focusIssueId) ?? null) : null);
 
   const selectIssue = useCallback(
-    (issueId: string) => setSelected(features.find((feature) => feature.id === issueId) ?? null),
+    (issueId: string) => {
+      setFocusPending(false);
+      setSelected(features.find((feature) => feature.id === issueId) ?? null);
+    },
     [features],
   );
-  const clearSelection = useCallback(() => setSelected(null), []);
+  const clearSelection = useCallback(() => {
+    setFocusPending(false);
+    setSelected(null);
+  }, []);
 
   return (
     <section className="issue-map-page">
@@ -38,11 +70,21 @@ export function IssueMapPage({ debounceMs = VIEWPORT_DEBOUNCE_MS }: { debounceMs
           <h1>Road issues</h1>
           <p>One marker per canonical issue. Repeated detections of the same issue share a marker.</p>
         </div>
-        {data && (
-          <span className="result-count" aria-live="polite">
-            {data.meta.total} {data.meta.total === 1 ? "issue" : "issues"} in view
-          </span>
-        )}
+        <div className="issue-map-actions">
+          {data && (
+            <span className="result-count" aria-live="polite">
+              {data.meta.total} {data.meta.total === 1 ? "issue" : "issues"} in view
+            </span>
+          )}
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={retry}
+            disabled={viewport === null || status === "loading"}
+          >
+            Refresh
+          </button>
+        </div>
       </div>
 
       <div className="issue-map-layout">
@@ -51,8 +93,8 @@ export function IssueMapPage({ debounceMs = VIEWPORT_DEBOUNCE_MS }: { debounceMs
         <div className="issue-map-stage">
           <IssueMap
             features={features}
-            selectedIssueId={selected?.id ?? null}
-            initialBounds={INITIAL_BOUNDS}
+            selectedIssueId={shown?.id ?? null}
+            initialBounds={mapBounds}
             onSelectIssue={selectIssue}
             onViewportChange={setViewport}
           />
@@ -85,7 +127,7 @@ export function IssueMapPage({ debounceMs = VIEWPORT_DEBOUNCE_MS }: { debounceMs
           <IssueLegend />
         </div>
 
-        <IssueSummaryPanel feature={selected} onClose={clearSelection} />
+        <IssueSummaryPanel feature={shown} onClose={clearSelection} />
       </div>
     </section>
   );

@@ -1,53 +1,85 @@
-import boto3
-import os
-import dotenv
-from contextlib import closing
-from uuid_extensions import uuid7
+"""Cloudflare R2 (S3 API) media storage.
 
-dotenv.load_dotenv()
+Configuration comes only from the process environment: `R2_BUCKET`,
+`R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`. Credentials, signed
+URLs, and object contents are never logged.
+"""
+
+from __future__ import annotations
+
+import os
+from contextlib import closing
+from typing import BinaryIO
+
+import boto3
+from boto3.s3.transfer import TransferConfig
+from botocore.config import Config
+
+# `get` is for JPEG-sized objects only; video goes through `download_to_file`.
+MAX_GET_BYTES = 32 * 1024 * 1024
+_CHUNK_BYTES = 1024 * 1024
+
+
+class StoredObjectTooLarge(ValueError):
+    """The stored object exceeds the caller's byte limit."""
+
+
 class R2MediaStorageAdapter:
     def __init__(self) -> None:
         self._bucket = os.environ["R2_BUCKET"]
         self._s3 = boto3.client(
-            service_name="s3",
+            "s3",
             endpoint_url=os.environ["R2_ENDPOINT"],
             aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
             aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
             region_name="auto",
+            config=Config(connect_timeout=10, read_timeout=60, retries={"max_attempts": 3}),
+        )
+        self._transfer = TransferConfig(
+            multipart_threshold=16 * 1024 * 1024,
+            multipart_chunksize=16 * 1024 * 1024,
+            max_concurrency=4,
+            use_threads=True,
         )
 
-    def put(
-      self, data: bytes, object_key: str, content_type: str
-    ) -> None:
-        """Store the image to R2 location using object_key """
-        response = self._s3.put_object(
-            Bucket=self._bucket,
-            Key=object_key,
-            Body=data,
-            ContentType=content_type,
+    def put(self, data: bytes, object_key: str, content_type: str) -> None:
+        self._s3.put_object(
+            Bucket=self._bucket, Key=object_key, Body=data, ContentType=content_type
         )
-        print(f"Uploaded successfully. ETag: {response['ETag']}")
+
+    def put_file(self, source: BinaryIO, object_key: str, content_type: str) -> None:
+        source.seek(0)
+        self._s3.upload_fileobj(
+            source,
+            self._bucket,
+            object_key,
+            ExtraArgs={"ContentType": content_type},
+            Config=self._transfer,
+        )
 
     def get(self, key: str) -> bytes:
-        """Using the key, find and return the image"""
         response = self._s3.get_object(Bucket=self._bucket, Key=key)
         with closing(response["Body"]) as body:
-            return body.read()
+            if response.get("ContentLength", 0) > MAX_GET_BYTES:
+                raise StoredObjectTooLarge("Stored object exceeds the in-memory limit")
+            data = body.read(MAX_GET_BYTES + 1)
+        if len(data) > MAX_GET_BYTES:
+            raise StoredObjectTooLarge("Stored object exceeds the in-memory limit")
+        return data
+
+    def download_to_file(self, key: str, target: BinaryIO, max_bytes: int) -> int:
+        response = self._s3.get_object(Bucket=self._bucket, Key=key)
+        total = 0
+        with closing(response["Body"]) as body:
+            if response.get("ContentLength", 0) > max_bytes:
+                raise StoredObjectTooLarge("Stored object exceeds the allowed size")
+            for chunk in body.iter_chunks(chunk_size=_CHUNK_BYTES):
+                total += len(chunk)
+                if total > max_bytes:
+                    raise StoredObjectTooLarge("Stored object exceeds the allowed size")
+                target.write(chunk)
+        target.flush()
+        return total
 
     def delete(self, key: str) -> None:
-        """Using the key, find and delete the image"""
         self._s3.delete_object(Bucket=self._bucket, Key=key)
-
-
-
-def test():
-    # need to call put to test out the put function
-    # so essentially we need to open an image as a file and then run file.read() to get the bytes
-    with open("/home/cornelius/Desktop/InfraScan/backend/inference/data/uploads/multi.jpg", "rb") as file:
-        data = file.read()
-        object_key = f"images/input/{uuid7()}.jpg"
-        r2 = R2MediaStorageAdapter()
-        r2.put(data, object_key, "image/jpeg")
-
-if __name__ == "__main__":
-    test()

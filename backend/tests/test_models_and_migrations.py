@@ -24,7 +24,7 @@ from postgres_support import run_alembic as _run_alembic
 
 REPO_ROOT = BACKEND_DIR.parent
 ALEMBIC_INI = BACKEND_DIR / "alembic.ini"
-HEAD_REVISION = "c3e5f7a92041"
+HEAD_REVISION = "d4f6a8b03152"
 
 
 def _load_alembic_runtime():

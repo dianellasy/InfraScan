@@ -30,6 +30,7 @@ class DetectionRecordRepository:
         evidence: EvidenceMedia,
         detections: Sequence[NewDetection],
         detected_at: datetime,
+        observed_at: datetime | None = None,
     ) -> list[DetectionRecord]:
         records = [
             DetectionRecord(
@@ -40,8 +41,10 @@ class DetectionRecordRepository:
                 severity=detection.severity,
                 bounding_box=list(detection.bounding_box),
                 location=detection.location,
-                frame_timestamp=None,
+                # Video detections carry their source frame's PTS; images have none.
+                frame_timestamp=evidence.frame_timestamp,
                 detected_at=detected_at,
+                observed_at=observed_at,
             )
             for detection in detections
         ]
@@ -61,6 +64,7 @@ class DetectionRecordRepository:
             select(DetectionRecord)
             .where(DetectionRecord.job_id == job_id)
             .order_by(
+                DetectionRecord.frame_timestamp.asc().nulls_first(),
                 DetectionRecord.detected_at,
                 DetectionRecord.confidence.desc(),
                 DetectionRecord.detection_id,

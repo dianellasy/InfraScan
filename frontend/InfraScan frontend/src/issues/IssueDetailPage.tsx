@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { apiUrl } from "../api/endpoints.ts";
+import { focusBounds, mapHref } from "../routing.ts";
 import { fetchIssue, fetchIssueDetections } from "./api.ts";
 import { issueTypeInfo, reviewReasonLabel, severityInfo, statusLabel } from "./constants.ts";
 import { formatCoordinates, formatDateTime } from "./format.ts";
@@ -128,10 +129,22 @@ function IssueDetail({ issue, detections }: { issue: Issue; detections: Page<Det
             <div>
               <dt>Location</dt>
               <dd>
-                {issue.latitude != null && issue.longitude != null
-                  ? formatCoordinates(issue.latitude, issue.longitude)
-                  : "No location (not shown on the map)"}
-                {issue.location_accuracy_m != null && ` (±${issue.location_accuracy_m} m)`}
+                {issue.latitude != null && issue.longitude != null ? (
+                  <>
+                    {formatCoordinates(issue.latitude, issue.longitude)}
+                    {issue.location_accuracy_m != null && ` (±${issue.location_accuracy_m} m)`}{" "}
+                    <a
+                      href={mapHref(
+                        focusBounds([{ latitude: issue.latitude, longitude: issue.longitude }]),
+                        issue.issue_id,
+                      )}
+                    >
+                      Show on map
+                    </a>
+                  </>
+                ) : (
+                  "No location (not shown on the map)"
+                )}
               </dd>
             </div>
             <div>
@@ -169,7 +182,7 @@ function IssueDetail({ issue, detections }: { issue: Issue; detections: Page<Det
           <table>
             <thead>
               <tr>
-                <th>Detected</th>
+                <th>Observed</th>
                 <th>Predicted class</th>
                 <th>Predicted type</th>
                 <th>Confidence</th>
@@ -185,7 +198,12 @@ function IssueDetail({ issue, detections }: { issue: Issue; detections: Page<Det
                   detection.predicted_issue_type_code !== issue.issue_type_code;
                 return (
                   <tr key={detection.detection_id} className={differs ? "type-differs" : undefined}>
-                    <td>{formatDateTime(detection.detected_at)}</td>
+                    <td>
+                      {detection.observed_at ? formatDateTime(detection.observed_at) : "Unknown"}
+                      {detection.frame_timestamp != null && (
+                        <span className="class-id"> (video {detection.frame_timestamp.toFixed(2)} s)</span>
+                      )}
+                    </td>
                     <td>
                       <strong>{detection.classification}</strong>
                       {detection.issue_type != null && (

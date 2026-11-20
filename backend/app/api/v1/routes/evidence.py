@@ -6,7 +6,11 @@ from fastapi import APIRouter, Depends, Response, status
 from app.api.dependencies import get_service
 from app.api.errors import error_response
 from app.schemas import APIErrorResponse
-from app.services.contracts import EvidenceNotFoundError, InfraScanService
+from app.services.contracts import (
+    EvidenceNotFoundError,
+    EvidenceUnavailableError,
+    InfraScanService,
+)
 
 router = APIRouter(prefix="/evidence", tags=["evidence"])
 
@@ -17,6 +21,10 @@ router = APIRouter(prefix="/evidence", tags=["evidence"])
     responses={
         200: {"content": {"image/jpeg": {}}, "description": "Evidence image bytes"},
         404: {"model": APIErrorResponse, "description": "Unknown evidence image"},
+        503: {
+            "model": APIErrorResponse,
+            "description": "EVIDENCE_UNAVAILABLE: the stored image cannot be read from object storage",
+        },
     },
 )
 async def get_evidence_image(
@@ -30,6 +38,13 @@ async def get_evidence_image(
             status.HTTP_404_NOT_FOUND,
             "EVIDENCE_NOT_FOUND",
             "The evidence image was not found.",
+            "media_id",
+        )
+    except EvidenceUnavailableError:
+        return error_response(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "EVIDENCE_UNAVAILABLE",
+            "The evidence image is temporarily unavailable.",
             "media_id",
         )
     # Evidence rows are immutable once written.

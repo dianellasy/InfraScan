@@ -293,6 +293,7 @@ def _seed_issue(session: Session, spec: SeedIssue, input_media: InputMedia) -> i
             location=location,
             frame_timestamp=None,
             detected_at=detected_at,
+            observed_at=job.captured_at,
         )
         rows.append((record, job, evidence))
 
@@ -303,7 +304,7 @@ def _seed_issue(session: Session, spec: SeedIssue, input_media: InputMedia) -> i
         spread = max(_segment_length_m((latitude, longitude), p) for p in located_points)
         accuracy = round(GPS_ACCURACY_M + spread, 1)
 
-    seen = [record.detected_at for record, _, _ in rows]
+    seen = [record.observed_at for record, _, _ in rows]
     issue = Issue(
         issue_id=seed_id("issue", spec.key),
         issue_type_code=spec.issue_type.value,

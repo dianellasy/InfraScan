@@ -17,16 +17,26 @@ from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.api.dependencies import get_service
 from app.api.errors import error_response as _error_response
+from app.api.video_validation import (
+    EmptyVideo,
+    MissingGps,
+    VideoTooLarge,
+    looks_like_iso_bmff,
+    validate_video_upload,
+)
 from app.schemas import (
     APIErrorResponse,
     InferenceJobAccepted,
     InferenceSubmissionMetadata,
+    ResolvedVideoSubmission,
+    VideoSubmissionMetadata,
 )
 from app.services.contracts import (
     InfraScanService,
     SubmissionDependencyUnavailableError,
 )
 from inference.celery.celery_app import celery_app
+from inference.video import MAX_VIDEO_BYTES, VideoRejected
 
 router = APIRouter(prefix="/inference", tags=["inference"])
 logger = logging.getLogger(__name__)
@@ -37,6 +47,8 @@ MAX_IMAGE_SHORTEST_SIDE = 3024
 _READ_CHUNK_SIZE = 1024 * 1024
 _HTTP_CONTENT_TOO_LARGE = 413
 _HTTP_UNPROCESSABLE_CONTENT = 422
+VIDEO_OFFSET_FIELD = "camera_utc_offset_minutes"
+_IMAGE_ONLY_FIELDS = frozenset({"captured_at", "latitude", "longitude"})
 
 DEFAULT_WEIGHT_PATH = os.environ.get(
     "INFRASCAN_WEIGHT_PATH",
@@ -92,7 +104,7 @@ def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return result
 
 
-def _parse_metadata(raw_metadata: str) -> InferenceSubmissionMetadata:
+def _decode_metadata(raw_metadata: str) -> dict[str, object]:
     try:
         decoded = json.loads(
             raw_metadata,
@@ -114,7 +126,38 @@ def _parse_metadata(raw_metadata: str) -> InferenceSubmissionMetadata:
             "Metadata must be a JSON object.",
             "metadata",
         )
+    return decoded
 
+
+def _parse_video_metadata(decoded: dict[str, object]) -> VideoSubmissionMetadata:
+    for name in decoded:
+        if name in _IMAGE_ONLY_FIELDS:
+            raise _ContractError(
+                _HTTP_UNPROCESSABLE_CONTENT,
+                "INVALID_METADATA",
+                "MP4 time and location come from the embedded GPS track; "
+                "send only camera_utc_offset_minutes.",
+                f"metadata.{name}",
+            )
+    try:
+        return VideoSubmissionMetadata.model_validate(decoded)
+    except ValidationError as exc:
+        first_error = exc.errors(include_url=False)[0]
+        location = first_error.get("loc", ())
+        name = str(location[0]) if location else VIDEO_OFFSET_FIELD
+        if first_error.get("type") == "extra_forbidden":
+            message = "MP4 metadata may contain only camera_utc_offset_minutes."
+        else:
+            message = (
+                "camera_utc_offset_minutes must be an integer multiple of 15 "
+                "between -720 and 840."
+            )
+        raise _ContractError(
+            _HTTP_UNPROCESSABLE_CONTENT, "INVALID_METADATA", message, f"metadata.{name}"
+        ) from exc
+
+
+def _parse_metadata(decoded: dict[str, object]) -> InferenceSubmissionMetadata:
     try:
         return InferenceSubmissionMetadata.model_validate(decoded)
     except ValidationError as exc:
@@ -164,7 +207,7 @@ def _parse_metadata(raw_metadata: str) -> InferenceSubmissionMetadata:
 
 async def _parse_multipart_request(
     request: Request,
-) -> tuple[StarletteUploadFile, InferenceSubmissionMetadata]:
+) -> tuple[StarletteUploadFile, dict[str, object]]:
     content_type = request.headers.get("content-type", "")
     media_type = content_type.partition(";")[0].strip().lower()
     if media_type != "multipart/form-data":
@@ -177,6 +220,13 @@ async def _parse_multipart_request(
     try:
         form = await request.form()
     except Exception as exc:
+        if request.scope.get("state", {}).get("upload_too_large"):
+            raise _ContractError(
+                _HTTP_CONTENT_TOO_LARGE,
+                "FILE_TOO_LARGE",
+                "The upload exceeds the 1,000,000,000-byte request limit.",
+                "file",
+            ) from exc
         raise _ContractError(
             status.HTTP_400_BAD_REQUEST,
             "INVALID_MULTIPART",
@@ -241,7 +291,7 @@ async def _parse_multipart_request(
             "metadata",
         )
 
-    return file_parts[0], _parse_metadata(metadata_parts[0])
+    return file_parts[0], _decode_metadata(metadata_parts[0])
 
 
 def _oriented_dimensions(image: Image.Image) -> tuple[int, int]:
@@ -351,6 +401,118 @@ async def _validate_image(upload: StarletteUploadFile) -> None:
         await upload.seek(0)
 
 
+async def _read_head(upload: StarletteUploadFile) -> bytes:
+    await upload.seek(0)
+    head = await upload.read(16)
+    await upload.seek(0)
+    return head
+
+
+async def _validate_video(
+    upload: StarletteUploadFile, metadata: VideoSubmissionMetadata
+) -> ResolvedVideoSubmission:
+    if upload.size is not None and upload.size > MAX_VIDEO_BYTES:
+        raise _ContractError(
+            _HTTP_CONTENT_TOO_LARGE,
+            "FILE_TOO_LARGE",
+            "The uploaded video exceeds 1,000,000,000 bytes.",
+            "file",
+        )
+    try:
+        validated = await run_in_threadpool(
+            validate_video_upload, upload.file, metadata.camera_utc_offset_minutes
+        )
+    except EmptyVideo as exc:
+        raise _ContractError(
+            _HTTP_UNPROCESSABLE_CONTENT,
+            "EMPTY_FILE",
+            "The uploaded file must not be empty.",
+            "file",
+        ) from exc
+    except VideoTooLarge as exc:
+        raise _ContractError(
+            _HTTP_CONTENT_TOO_LARGE,
+            "FILE_TOO_LARGE",
+            "The uploaded video exceeds 1,000,000,000 bytes.",
+            "file",
+        ) from exc
+    except VideoRejected as exc:
+        logger.info("Rejected MP4 upload: %s", exc.code)
+        raise _ContractError(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
+            if exc.kind == "unsupported"
+            else _HTTP_UNPROCESSABLE_CONTENT,
+            exc.code,
+            exc.message,
+            "file",
+        ) from exc
+    except MissingGps as exc:
+        logger.info("Rejected MP4 upload without a usable A119 GPS track")
+        raise _ContractError(
+            _HTTP_UNPROCESSABLE_CONTENT,
+            "MISSING_GPS_TRACK",
+            "The video has no usable embedded A119 Mini 2 GPS fix. Turn on the "
+            "camera's GPS and wait for a satellite fix before recording.",
+            "file",
+        ) from exc
+    except OSError as exc:
+        logger.exception("Video validation tools are unavailable")
+        raise SubmissionDependencyUnavailableError from exc
+
+    first = validated.track.first_fix
+    return ResolvedVideoSubmission(
+        captured_at=first.recorded_at.isoformat(),
+        latitude=first.latitude,
+        longitude=first.longitude,
+        camera_utc_offset_minutes=metadata.camera_utc_offset_minutes,
+    )
+
+
+async def _validate_submission(
+    upload: StarletteUploadFile, decoded: dict[str, object]
+) -> InferenceSubmissionMetadata:
+    """Choose the JPEG or MP4 contract from the file bytes, never the filename."""
+    is_mp4 = looks_like_iso_bmff(await _read_head(upload))
+    if not is_mp4 and VIDEO_OFFSET_FIELD not in decoded:
+        metadata = _parse_metadata(decoded)
+        await _validate_image(upload)
+        return metadata
+
+    video_metadata = _parse_video_metadata(decoded)
+    return await _validate_video(upload, video_metadata)
+
+
+_IMAGE_METADATA_SCHEMA = {
+    "title": "Image metadata",
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["captured_at", "latitude", "longitude"],
+    "properties": {
+        "captured_at": {"type": "string", "format": "date-time"},
+        "latitude": {"type": "number", "minimum": -90, "maximum": 90},
+        "longitude": {"type": "number", "minimum": -180, "maximum": 180},
+    },
+}
+_VIDEO_METADATA_SCHEMA = {
+    "title": "MP4 metadata",
+    "type": "object",
+    "additionalProperties": False,
+    "required": [VIDEO_OFFSET_FIELD],
+    "properties": {
+        VIDEO_OFFSET_FIELD: {
+            "type": "integer",
+            "minimum": -720,
+            "maximum": 840,
+            "multipleOf": 15,
+            "description": (
+                "The dashcam's time-zone setting as minutes from UTC, for "
+                "example -480 for UTC-08:00. A119 Mini 2 records local wall "
+                "time; this offset converts it to UTC."
+            ),
+        },
+    },
+}
+
 _SUBMISSION_REQUEST_BODY = {
     "required": True,
     "content": {
@@ -363,37 +525,31 @@ _SUBMISSION_REQUEST_BODY = {
                         "type": "string",
                         "format": "binary",
                         "description": (
-                            "One JPEG image, at most 5,000,000 bytes; longest "
-                            "side at most 4032 px and shortest side at most 3024 px."
+                            "The media type is detected from the bytes, not the "
+                            "filename or declared MIME type. JPEG: at most "
+                            "5,000,000 bytes; longest side at most 4032 px and "
+                            "shortest side at most 3024 px. MP4 (VIOFO A119 Mini 2): "
+                            "ISO Base Media file of at most 1,000,000,000 bytes; "
+                            "duration above 0 and at most 600 s (0.5 s container "
+                            "rounding tolerance); exactly one 8-bit 4:2:0 H.264 "
+                            "video stream within 1920x1080 in either orientation; "
+                            "average and peak frame rate at most 30 fps; audio "
+                            "optional and ignored; an embedded A119 Novatek "
+                            "freeGPS track with at least one active fix."
                         ),
                     },
                     "metadata": {
                         "type": "string",
                         "description": (
-                            "JSON object containing only captured_at, latitude, "
-                            "and longitude. captured_at must include a timezone."
+                            "JSON object. For a JPEG: only captured_at (with a "
+                            "timezone), latitude, and longitude. For an MP4: only "
+                            "camera_utc_offset_minutes; the job's captured_at, "
+                            "latitude, and longitude come from the first active "
+                            "GPS fix."
                         ),
                         "contentMediaType": "application/json",
                         "contentSchema": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "required": ["captured_at", "latitude", "longitude"],
-                            "properties": {
-                                "captured_at": {
-                                    "type": "string",
-                                    "format": "date-time",
-                                },
-                                "latitude": {
-                                    "type": "number",
-                                    "minimum": -90,
-                                    "maximum": 90,
-                                },
-                                "longitude": {
-                                    "type": "number",
-                                    "minimum": -180,
-                                    "maximum": 180,
-                                },
-                            },
+                            "oneOf": [_IMAGE_METADATA_SCHEMA, _VIDEO_METADATA_SCHEMA]
                         },
                     },
                 },
@@ -403,28 +559,59 @@ _SUBMISSION_REQUEST_BODY = {
     },
 }
 
+_ERROR_CODES = {
+    400: "INVALID_MULTIPART, MULTIPLE_FILES, DUPLICATE_METADATA, UNEXPECTED_MULTIPART_FIELD",
+    413: (
+        "FILE_TOO_LARGE: JPEG over 5,000,000 bytes, MP4 over 1,000,000,000 bytes, "
+        "or a request body over the upload limit (with or without Content-Length)"
+    ),
+    415: (
+        "UNSUPPORTED_REQUEST_MEDIA_TYPE (not multipart/form-data); "
+        "UNSUPPORTED_IMAGE_FORMAT (image metadata with non-JPEG bytes); "
+        "UNSUPPORTED_MEDIA_FORMAT (MP4 metadata with non-MP4 bytes, QuickTime, "
+        "H.265, non-H.264 codec, unsupported H.264 profile or pixel format, or "
+        "more than one video stream)"
+    ),
+    422: (
+        "MISSING_FILE, MISSING_METADATA, EMPTY_FILE, INVALID_METADATA_JSON, "
+        "INVALID_METADATA (including any MP4 metadata error), "
+        "UNKNOWN_METADATA_FIELD, MISSING_METADATA_FIELD, INVALID_CAPTURED_AT, "
+        "INVALID_COORDINATE, INVALID_IMAGE, INVALID_IMAGE_DIMENSIONS, "
+        "INVALID_VIDEO (corrupt or undecodable MP4), INVALID_VIDEO_DIMENSIONS "
+        "(over 1920x1080), INVALID_VIDEO_FRAME_RATE (over 30 fps), "
+        "INVALID_VIDEO_DURATION (empty or over 10 minutes), MISSING_GPS_TRACK "
+        "(no usable A119 GPS fix)"
+    ),
+}
+
 
 @router.post(
     "/jobs",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=InferenceJobAccepted,
-    summary="Submit one JPEG for asynchronous road-damage inference",
+    summary="Submit one JPEG or A119 Mini 2 MP4 for asynchronous road-damage inference",
     description=(
-        "Validates and accepts one image without waiting for model inference. "
+        "Validates and accepts one JPEG image or one VIOFO A119 Mini 2 MP4 without "
+        "waiting for model inference. Media is streamed to object storage; an MP4 "
+        "is processed as one job that samples at most 60 frames. "
         "Authentication is deferred; the future production contract will use "
         "an Authorization: Bearer <token> header and derive the user ID on the "
         "backend. Track the returned application job ID with GET "
         "/api/v1/jobs/{job_id}."
     ),
     responses={
-        400: {"model": APIErrorResponse, "description": "Invalid multipart structure"},
-        413: {"model": APIErrorResponse, "description": "File exceeds 5,000,000 bytes"},
-        415: {"model": APIErrorResponse, "description": "Unsupported media type"},
-        422: {"model": APIErrorResponse, "description": "Invalid file or metadata"},
+        400: {"model": APIErrorResponse, "description": _ERROR_CODES[400]},
+        413: {"model": APIErrorResponse, "description": _ERROR_CODES[413]},
+        415: {"model": APIErrorResponse, "description": _ERROR_CODES[415]},
+        422: {"model": APIErrorResponse, "description": _ERROR_CODES[422]},
         500: {"model": APIErrorResponse, "description": "Unexpected internal failure"},
         503: {
             "model": APIErrorResponse,
-            "description": "Submission service unavailable",
+            "description": (
+                "SERVICE_UNAVAILABLE (not configured) or "
+                "SUBMISSION_DEPENDENCY_UNAVAILABLE (database, object storage, "
+                "queue, or video tools unavailable)"
+            ),
         },
     },
     openapi_extra={"requestBody": _SUBMISSION_REQUEST_BODY},
@@ -434,10 +621,16 @@ async def submit_inference(
     service: InfraScanService | None = Depends(_get_submission_service),
 ) -> InferenceJobAccepted | JSONResponse:
     try:
-        upload, metadata = await _parse_multipart_request(request)
-        await _validate_image(upload)
+        upload, decoded = await _parse_multipart_request(request)
+        metadata = await _validate_submission(upload, decoded)
     except _ContractError as exc:
         return _error_response(exc.status_code, exc.code, exc.message, exc.field)
+    except SubmissionDependencyUnavailableError:
+        return _error_response(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "SUBMISSION_DEPENDENCY_UNAVAILABLE",
+            "A required submission dependency is unavailable.",
+        )
 
     if service is None:
         return _error_response(

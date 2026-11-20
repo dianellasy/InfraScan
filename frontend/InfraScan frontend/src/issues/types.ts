@@ -55,7 +55,12 @@ export type Detection = {
   confidence: number;
   latitude: number | null;
   longitude: number | null;
+  /** When inference finished. */
   detected_at: string;
+  /** When the source image or video frame was captured; null for some historical video rows. */
+  observed_at: string | null;
+  /** Seconds into the source video; null for still images. */
+  frame_timestamp: number | null;
   issue_id: string | null;
   /** Raw model class ID as predicted. */
   issue_type: number | null;

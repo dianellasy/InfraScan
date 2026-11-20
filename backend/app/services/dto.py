@@ -35,6 +35,7 @@ def detection_to_dto(record: DetectionRecord) -> DetectionDTO:
         latitude=location.latitude if location else None,
         longitude=location.longitude if location else None,
         detected_at=utc(record.detected_at),
+        observed_at=utc(record.observed_at),
         issue_id=record.issue_id,
         issue_type=record.issue_type,
         predicted_issue_type_code=predicted_type.value if predicted_type else None,

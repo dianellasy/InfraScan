@@ -7,6 +7,7 @@ from uuid import UUID
 
 from celery.signals import worker_process_init, worker_process_shutdown
 
+from app.adapters.r2_storage import R2MediaStorageAdapter
 from app.services.inference_processing import InferenceJobProcessor
 from inference.celery import database
 from inference.celery.celery_app import PROCESS_INFERENCE_JOB_TASK, celery_app
@@ -53,6 +54,15 @@ def run_v0_mvp_inference(image_bytes, filename):
     return inference_with_annotation(DEFAULT_WEIGHT_PATH, image_bytes, filename=filename)
 
 
+def build_processor() -> InferenceJobProcessor:
+    return InferenceJobProcessor(
+        database.get_session_factory(),
+        run_inference=run_v0_mvp_inference,
+        media_storage=R2MediaStorageAdapter(),
+        work_dir=os.environ.get("INFRASCAN_WORK_DIR") or None,
+    )
+
+
 # Results live in the application tables; the Celery result backend is unused.
 @celery_app.task(name=PROCESS_INFERENCE_JOB_TASK, ignore_result=True)
 def process_inference_job(job_id: str) -> None:
@@ -61,7 +71,4 @@ def process_inference_job(job_id: str) -> None:
     except (TypeError, ValueError, AttributeError):
         logger.error("Ignoring inference task with invalid job_id %r", job_id)
         return
-    processor = InferenceJobProcessor(
-        database.get_session_factory(), run_inference=run_v0_mvp_inference
-    )
-    processor.process(parsed_job_id)
+    build_processor().process(parsed_job_id)

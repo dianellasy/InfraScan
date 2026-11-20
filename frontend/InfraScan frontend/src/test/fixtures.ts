@@ -85,6 +85,8 @@ export function detection(overrides: Partial<Detection> = {}): Detection {
     latitude: 33.8026,
     longitude: -117.98,
     detected_at: "2026-10-05T16:02:00Z",
+    observed_at: "2026-10-05T16:01:00Z",
+    frame_timestamp: null,
     issue_id: "issue-pothole",
     issue_type: 3,
     predicted_issue_type_code: "pothole",

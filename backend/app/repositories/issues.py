@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
-from sqlalchemy import ColumnElement, Select, and_, case, func, or_, select
+from sqlalchemy import ColumnElement, Select, and_, case, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -79,6 +79,13 @@ def _filter_clauses(filters: IssueFilters) -> list[ColumnElement[bool]]:
         clauses.append(Issue.last_seen_at >= filters.last_seen_after)
     if filters.last_seen_before is not None:
         clauses.append(Issue.last_seen_at <= filters.last_seen_before)
+    if filters.job_id is not None:
+        clauses.append(
+            exists().where(
+                DetectionRecord.issue_id == Issue.issue_id,
+                DetectionRecord.job_id == filters.job_id,
+            )
+        )
     return clauses
 
 
