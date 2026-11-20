@@ -1,7 +1,122 @@
-# Model card: infrascan-rdd2022-yolo11s, v0-mvp
+# Model card: InfraScan road damage detector
 
-Status: Milestone A (MVP model). Trained 11 Nov 2026. Every number below comes
-from files in `ml/reports/b0_yolo11s_640/`.
+Current model: **v1** (`infrascan-yolo26s-rdd2022-cmird`, run e7), in `backend/inference/weights/best.pt`
+since 20 Nov 2026. The earlier v0-mvp is kept below as history.
+
+# v1: infrascan-yolo26s-rdd2022-cmird (run e7)
+
+Every number in this section comes from files in `ml/reports/e7_yolo26s_cmird_holdout/` (val, test,
+held-out videos) or was measured as stated. How it was chosen: `ml/EXPERIMENTS.md` sections 3-10.
+
+## What it does
+
+Same task, classes and API output as v0: boxes for 4 classes in one road photo (ids 0 Longitudinal crack,
+1 Transverse crack, 2 Alligator crack, 3 Pothole; class order unchanged, so `inference/labels.py` and stored
+class ids stay valid). Only "Pothole" is one of the six PRD issue types.
+
+## Model
+
+- Ultralytics YOLO26s (COCO pretrained), fine-tuned. Ultralytics 8.4.210 (YOLO26 needs a recent Ultralytics;
+  older versions cannot load it). Input size 640. Weights 20.3 MB.
+- Training: 50 epochs, batch 32, seed 42, default augmentation, AMP, one Tesla T4 on Kaggle, 2.05 h.
+  Kaggle notebook (code, full log, outputs): https://www.kaggle.com/code/adarshjaiswal2234/infrascan-e7-yolo26s-cmird-holdout
+- Confidence cut-off in the app: 0.25 (`INFRASCAN_CONF`), unchanged.
+
+## Data
+
+- **RDD2022, India + United States only** (the PRD pilots), split 80/10/10 per country with near-duplicates kept
+  in one split (data_v1, `ml/reports/data_v1/`): train 10,023 / val 1,253 / test 1,235 photos. CC BY-SA 4.0.
+- **Plus CMIRD** Indian motorbike dashcam frames, train only: 202 frames / 318 pothole boxes from 14 videos.
+  7 other CMIRD videos (119 frames, 164 potholes) were kept out of training to test on. CC BY-NC-SA 4.0.
+- **Licence: because of CMIRD, this model is for non-commercial use only** (fine for the project and paper).
+- Night is still essentially missing from the training data.
+
+## Results
+
+### Test split (1,235 photos, 165 with potholes, 358 pothole boxes; scored once, 20 Nov 2026)
+
+| Test | v1 (e7) | e4 (same model without CMIRD) |
+| --- | --- | --- |
+| mAP50, all classes (Ultralytics) | 0.621 | 0.625 |
+| Pothole AP50 (Ultralytics) | 0.466 | 0.482 |
+| Pothole precision / recall at 0.25 (own matching, IoU 0.5) | 0.558 / 0.455 | 0.627 / 0.408 |
+| Pothole photos found, conf 0.25 (of 165) | 118 | 114 |
+| Photos wrongly flagged, conf 0.25 | 17 | 12 |
+| India mAP50 / United States mAP50 | 0.415 / 0.573 | 0.415 / 0.583 |
+
+Paired e7 minus e4 on test (own matching, 95% interval): pothole AP50 -0.004 (-0.038 to +0.033), i.e. the same;
+recall at 0.25 +0.047 (+0.010 to +0.082), i.e. finds more potholes, at the cost of a few more false alarms.
+
+For comparison, v0-mvp's test numbers below (pothole AP50 0.482) were measured on a leaky split with all 7
+countries, so they are not comparable with the table above.
+
+### Pothole at fixed cut-offs (test, own matching, IoU 0.5)
+
+PRD target: precision at least 0.90 and recall at least 0.85.
+
+| cut-off | precision | recall |
+| --- | --- | --- |
+| 0.15 | 0.429 | 0.533 |
+| 0.25 (app default) | 0.558 | 0.455 |
+| 0.35 | 0.678 | 0.377 |
+| 0.50 | 0.788 | 0.249 |
+| 0.65 | 0.829 | 0.095 |
+
+The PRD pothole target is NOT met at any cut-off. At the app default 0.25 the model boxes about 4-5 in 10
+labelled potholes, and about 4 in 10 of its pothole boxes do not match a label (many of these sit on real but
+unlabelled damage, see the error review in `ml/EXPERIMENTS.md` sec. 3). Per photo ("does this photo have a
+pothole?") it is better: 118 of 165 pothole photos found, 17 photos wrongly flagged.
+
+### Indian motorbike footage (7 CMIRD videos never used in training)
+
+| Held-out videos (119 frames, 164 potholes) | v1 (e7) | e4 |
+| --- | --- | --- |
+| Pothole AP50 | 0.229 | 0.080 |
+| Recall at 0.25 | 0.30 | 0.02 |
+| Frames with a pothole found, conf 0.20 | 94 | 12 |
+
+This is why e7 was chosen over e4: e4 (trained on RDD2022 only) is nearly blind on this kind of footage.
+Only 7 videos from one source, so read the size of the gain as rough.
+
+## Speed (CPU, through the real `inference_service` code path)
+
+Intel Core i7-13700HX laptop, batch 1, median of 5 calls (20 Nov 2026), same machine for both models:
+
+| input size | v1 (e7) | v0-mvp |
+| --- | --- | --- |
+| 640x640 | 198 ms | 195 ms |
+| 1280x720 | 142 ms | 91 ms |
+| 1920x1080 | 173 ms | 87 ms |
+| 4032x3024 (phone photo) | 405 ms | 238 ms |
+
+The first call in a process takes about 3 s (model load). Well under the PRD limit of 2 s per frame.
+
+## Severity
+
+Unchanged from v0: HEURISTIC, NOT VALIDATED (box area share plus class, `severity_heuristic` in `service.py`).
+
+## Known limits
+
+- Potholes: recall about 0.45 at 0.25 on test; misses many, especially small and far ones.
+- Night and low light: not in the training data.
+- Motorbike / monsoon street footage: much better than e4 but still finds only about 3 in 10 potholes on
+  unseen videos. More footage of that kind is the most promising next step (`ml/NEXT_DATA.md`).
+- Draws some loose or oversized boxes; on video, use tracking to steady boxes (Colab notebook, step 7b).
+- 1 of 6 PRD issue types covered. Non-commercial licence (CMIRD).
+
+## Reproduce
+
+`python ml/kaggle/build_kernel.py --run e7_yolo26s_cmird_holdout`, then
+`kaggle kernels push -p ml/kaggle/_build/e7_yolo26s_cmird_holdout` (needs the Kaggle datasets listed in
+`ml/kaggle/runs.json`). Score held-out videos with `ml/eval/score_holdout.py`, test with
+`ml/eval/evaluate.py` (`full_report`).
+
+---
+
+# History: v0-mvp (infrascan-rdd2022-yolo11s)
+
+Status: Milestone A (MVP model). Trained 11 Nov 2026. Replaced by v1 on 20 Nov 2026. Every number below comes
+from files in `ml/reports/b0_yolo11s_640/`. Its scores are optimistic (split leakage, see Data).
 
 ## What it does
 
@@ -54,7 +169,8 @@ See `ml/NEXT_DATA.md` for datasets that could add them.
 - Leakage warning: a near-duplicate check (dHash, distance 4 or less) found
   2,118 image pairs that sit in different splits (1,056 test-train, 944
   train-val, 118 test-val). Val and test scores may be somewhat optimistic.
-  To fix in the next data version.
+  Fixed in data_v1 (14 Nov 2026, `ml/EXPERIMENTS.md` sec. 2): the same model setup on the leak-free split
+  (b1) scores pothole AP50 0.37-0.40 on val instead of 0.49.
 
 ## Results
 
@@ -144,11 +260,13 @@ class (`severity_heuristic` in `service.py`). RDD2022 has no severity labels.
 - Night, rain and low-light images: not in the training data. Expect worse
   results.
 - 1 of 6 PRD issue types covered.
-- Possible split leakage from near-duplicates (see Data).
+- Split leakage from near-duplicates makes the scores above optimistic (see Data).
 - Close-up phone photos look different from the dashcam views in RDD2022.
 
 ## Reproduce
 
-1. `python ml/kaggle/build_kernel.py ml/kaggle/b0_yolo11s_640/body.py ml/kaggle/b0_yolo11s_640/run.py`
-2. `kaggle kernels push -p ml/kaggle/b0_yolo11s_640 --accelerator NvidiaTeslaT4`
-3. Download outputs with `kaggle kernels output atulchahar/infrascan-b0-yolo11s-640 -p ml/runs/b0_yolo11s_640`.
+The exact code, full log and outputs of this run are in the Kaggle notebook
+https://www.kaggle.com/code/atulchahar/infrascan-b0-yolo11s-640 and in git commit c4bfda1
+(`ml/kaggle/b0_yolo11s_640/body.py` and the `ml/data/prepare_rdd2022.py` of that commit). The current
+`prepare_rdd2022.py` only builds the leak-free v1 split, so it can no longer rebuild b0's split; the b0 job
+folder was removed from `ml/kaggle/` on 18 Nov 2026. b0's numbers stay in `ml/reports/b0_yolo11s_640/`.

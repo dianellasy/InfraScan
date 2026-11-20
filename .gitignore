@@ -9,3 +9,5 @@ ml/**/__pycache__/
 *.cache
 runs/
 ml/kaggle/*/run.py
+ml/kaggle/_build/
+ml/.pytest_cache/
