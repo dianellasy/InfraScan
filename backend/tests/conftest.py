@@ -9,7 +9,14 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.db import create_db_engine, create_session_factory
 from postgres_support import disposable_postgres, run_alembic
 
-APPLICATION_TABLES = ("detection_records", "evidence_media", "inference_jobs", "input_media")
+# `issue_types` is reference data inserted by its migration, so it is not truncated.
+APPLICATION_TABLES = (
+    "detection_records",
+    "evidence_media",
+    "inference_jobs",
+    "input_media",
+    "issues",
+)
 
 
 @pytest.fixture

@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { endpoints } from "./api/endpoints.ts";
-import infrascanLogo from "./assets/infrascan.svg";
+import { request } from "./api/request.ts";
+import { TopBar } from "./TopBar.tsx";
 import "./App.css";
 
 type Job = {
@@ -41,37 +42,6 @@ function isSuccessful(status: string) {
   return ["completed", "complete", "succeeded", "success", "done"].includes(
     status.toLowerCase(),
   );
-}
-
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
-  if (!response.ok) {
-    const body = await response.text();
-    let message = body || response.statusText;
-    try {
-      const parsed: unknown = JSON.parse(body);
-      if (
-        typeof parsed === "object" &&
-        parsed !== null &&
-        "error" in parsed &&
-        typeof parsed.error === "object" &&
-        parsed.error !== null &&
-        "message" in parsed.error
-      ) {
-        message = String(parsed.error.message);
-      } else if (
-        typeof parsed === "object" &&
-        parsed !== null &&
-        "detail" in parsed
-      ) {
-        message = String(parsed.detail);
-      }
-    } catch {
-      // Use the response text when the server does not return JSON.
-    }
-    throw new Error(`Request failed (${response.status}): ${message}`);
-  }
-  return (await response.json()) as T;
 }
 
 function App() {
@@ -219,13 +189,7 @@ function App() {
 
   return (
     <main className="app-shell">
-      <header className="topbar">
-        <a className="brand" href="#" aria-label="InfraScan home">
-          <img className="brand-mark" src={infrascanLogo} alt="" />
-          <span>InfraScan</span>
-        </a>
-        <span className="topbar-note">Road infrastructure inspection</span>
-      </header>
+      <TopBar route="upload" />
 
       <section className="intro">
         <p className="eyebrow">IMAGE ANALYSIS</p>

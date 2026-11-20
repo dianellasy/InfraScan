@@ -66,7 +66,7 @@ def test_detection_record_columns_and_nullability() -> None:
     assert table.c.detected_at.server_default is None
 
 
-def test_detection_record_foreign_keys_and_deferred_issue_references() -> None:
+def test_detection_record_foreign_keys_and_issue_references() -> None:
     table = DetectionRecord.__table__
 
     assert _fk_targets(table.c.job_id) == {"inference_jobs.job_id"}
@@ -76,8 +76,9 @@ def test_detection_record_foreign_keys_and_deferred_issue_references() -> None:
 
     assert _fk_targets(table.c.evidence_media) == {"evidence_media.media_id"}
 
-    # Intended FKs to issues / issue_types are deferred until those tables exist.
-    assert table.c.issue_id.foreign_keys == set()
+    assert _fk_targets(table.c.issue_id) == {"issues.issue_id"}
+    assert table.c.issue_id.nullable
+    # The raw predicted model class is preserved, so it has no FK to issue_types.
     assert table.c.issue_type.foreign_keys == set()
 
     check_names = {

@@ -13,26 +13,34 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from app.adapters.ports import InferenceQueueAdapter
-from app.models import DetectionRecord, InferenceJob
+from app.models import InferenceJob
 from app.repositories import (
     DetectionRecordRepository,
     InferenceJobRepository,
     InputMediaRepository,
 )
 from app.schemas import (
+    BoundingBox,
     DetectionDTO,
-    DetectionLocation,
     InferenceJobAccepted,
     InferenceJobDTO,
     InferenceMetadata,
     InferenceSubmissionMetadata,
+    IssueDTO,
+    IssueFeatureCollection,
+    IssueFilters,
     Page,
 )
 from app.services.contracts import (
+    EvidenceNotFoundError,
+    IssueNotFoundError,
     JobNotFoundError,
     SubmissionDependencyUnavailableError,
 )
-from inference.labels import class_label
+from app.services.dto import detection_to_dto
+from app.services.issues import EvidenceImage, IssueQueries
+
+__all__ = ["DatabaseInfraScanService", "detection_to_dto", "job_to_dto"]
 
 logger = logging.getLogger(__name__)
 
@@ -63,30 +71,6 @@ def job_to_dto(job: InferenceJob) -> InferenceJobDTO:
     )
 
 
-def detection_to_dto(record: DetectionRecord) -> DetectionDTO:
-    location = (
-        DetectionLocation.model_validate(record.location)
-        if record.location is not None
-        else None
-    )
-    return DetectionDTO(
-        detection_id=record.detection_id,
-        job_id=record.job_id,
-        classification=class_label(record.issue_type),
-        severity=record.severity,
-        confidence=record.confidence,
-        latitude=location.latitude if location else None,
-        longitude=location.longitude if location else None,
-        detected_at=_utc(record.detected_at),
-        issue_id=record.issue_id,
-        issue_type=record.issue_type,
-        evidence_media=record.evidence_media,
-        location=location,
-        bounding_box=list(record.bounding_box),
-        frame_timestamp=record.frame_timestamp,
-    )
-
-
 class DatabaseInfraScanService:
     """PostgreSQL-backed `InfraScanService` for inference submission and tracking.
 
@@ -102,6 +86,7 @@ class DatabaseInfraScanService:
     ) -> None:
         self._session_factory = session_factory
         self._queue = queue
+        self._issues = IssueQueries(session_factory)
 
     async def submit_inference(
         self, file: UploadFile, metadata: InferenceSubmissionMetadata
@@ -190,23 +175,55 @@ class DatabaseInfraScanService:
                 page_size=page_size,
             )
 
+    async def list_issue_map(
+        self, bbox: BoundingBox, filters: IssueFilters, limit: int
+    ) -> IssueFeatureCollection:
+        return await run_in_threadpool(self._issues.map_features, bbox, filters, limit)
+
+    async def list_issues(
+        self,
+        filters: IssueFilters,
+        bbox: BoundingBox | None,
+        page: int,
+        page_size: int,
+    ) -> Page[IssueDTO]:
+        return await run_in_threadpool(
+            self._issues.list_issues, filters, bbox, page, page_size
+        )
+
+    async def list_review_queue(self, page: int, page_size: int) -> Page[IssueDTO]:
+        return await run_in_threadpool(self._issues.review_queue, page, page_size)
+
+    async def get_issue(self, issue_id: UUID) -> IssueDTO:
+        issue = await run_in_threadpool(self._issues.get, issue_id)
+        if issue is None:
+            raise IssueNotFoundError(issue_id)
+        return issue
+
+    async def list_issue_detections(
+        self, issue_id: UUID, page: int, page_size: int
+    ) -> Page[DetectionDTO]:
+        detections = await run_in_threadpool(
+            self._issues.detections, issue_id, page, page_size
+        )
+        if detections is None:
+            raise IssueNotFoundError(issue_id)
+        return detections
+
+    async def get_evidence_image(self, media_id: UUID) -> EvidenceImage:
+        image = await run_in_threadpool(self._issues.evidence, media_id)
+        if image is None:
+            raise EvidenceNotFoundError(media_id)
+        return image
+
     # Not part of the inference MVP; the API maps these to 501 Not Implemented.
     async def list_jobs(self, *args: Any, **kwargs: Any) -> NoReturn:
-        raise NotImplementedError
-
-    async def list_issues(self, *args: Any, **kwargs: Any) -> NoReturn:
-        raise NotImplementedError
-
-    async def get_issue(self, *args: Any, **kwargs: Any) -> NoReturn:
         raise NotImplementedError
 
     async def create_issue(self, *args: Any, **kwargs: Any) -> NoReturn:
         raise NotImplementedError
 
     async def update_issue(self, *args: Any, **kwargs: Any) -> NoReturn:
-        raise NotImplementedError
-
-    async def list_review_queue(self, *args: Any, **kwargs: Any) -> NoReturn:
         raise NotImplementedError
 
     async def list_roads(self, *args: Any, **kwargs: Any) -> NoReturn:

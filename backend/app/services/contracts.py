@@ -6,6 +6,7 @@ from fastapi import UploadFile
 
 from app.schemas import (
     AnalyticsOverviewDTO,
+    BoundingBox,
     DamageDistributionDTO,
     DetectionDTO,
     DetectionEvidenceDTO,
@@ -16,11 +17,14 @@ from app.schemas import (
     InferenceSubmissionMetadata,
     IssueCreate,
     IssueDTO,
+    IssueFeatureCollection,
+    IssueFilters,
     IssueUpdate,
     Page,
     RoadConditionDTO,
     RoadDTO,
 )
+from app.services.issues import EvidenceImage
 
 
 class SubmissionDependencyUnavailableError(Exception):
@@ -29,6 +33,14 @@ class SubmissionDependencyUnavailableError(Exception):
 
 class JobNotFoundError(LookupError):
     """No inference job exists for the requested application job ID."""
+
+
+class IssueNotFoundError(LookupError):
+    """No Issue exists for the requested issue ID."""
+
+
+class EvidenceNotFoundError(LookupError):
+    """No evidence image exists for the requested media ID."""
 
 
 class InfraScanService(Protocol):
@@ -44,11 +56,31 @@ class InfraScanService(Protocol):
         """
         ...
 
+    async def list_issue_map(
+        self, bbox: BoundingBox, filters: IssueFilters, limit: int
+    ) -> IssueFeatureCollection:
+        """Located Issues in `bbox` as GeoJSON, one Feature per Issue.
+
+        Returns at most `limit` features (most severe, then most recently seen,
+        first) and reports in `meta` whether more Issues matched.
+        """
+        ...
+
     async def list_issues(
-        self, page: int, page_size: int, status: str | None
+        self,
+        filters: IssueFilters,
+        bbox: BoundingBox | None,
+        page: int,
+        page_size: int,
     ) -> Page[IssueDTO]: ...
 
     async def get_issue(self, issue_id: UUID) -> IssueDTO: ...
+
+    async def list_issue_detections(
+        self, issue_id: UUID, page: int, page_size: int
+    ) -> Page[DetectionDTO]: ...
+
+    async def get_evidence_image(self, media_id: UUID) -> EvidenceImage: ...
 
     async def create_issue(self, issue: IssueCreate) -> IssueDTO: ...
 

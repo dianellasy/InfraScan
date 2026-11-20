@@ -3,6 +3,34 @@
   margin: 0 auto;
 }
 
+.app-shell.wide {
+  width: min(1480px, calc(100% - 40px));
+}
+
+.topbar-nav {
+  display: flex;
+  gap: 6px;
+}
+
+.topbar-nav a {
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.topbar-nav a:hover {
+  background: #edf1ef;
+  color: var(--ink);
+}
+
+.topbar-nav a[aria-current="page"] {
+  background: #e7effb;
+  color: var(--accent-dark);
+}
+
 .topbar {
   min-height: 76px;
   display: flex;

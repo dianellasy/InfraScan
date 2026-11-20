@@ -1,6 +1,6 @@
 import math
 from datetime import UTC, datetime
-from typing import Annotated, Generic, Literal, TypeVar
+from typing import Annotated, Generic, Literal, Self, TypeVar
 from uuid import UUID
 
 from pydantic import (
@@ -11,7 +11,11 @@ from pydantic import (
     Field,
     HttpUrl,
     field_validator,
+    model_validator,
 )
+
+from app.models.detection_record import DetectionSeverity
+from app.models.issue import IssueStatus, IssueTypeCode
 
 T = TypeVar("T")
 
@@ -104,11 +108,160 @@ class IssueUpdate(BaseModel):
     severity: str | None = None
 
 
-class IssueDTO(IssueCreate):
+Latitude = Annotated[float, Field(ge=-90, le=90)]
+Longitude = Annotated[float, Field(ge=-180, le=180)]
+
+
+class BoundingBox(BaseModel):
+    """Inclusive viewport; boxes crossing the antimeridian are not supported."""
+
+    min_latitude: Latitude
+    min_longitude: Longitude
+    max_latitude: Latitude
+    max_longitude: Longitude
+
+    @model_validator(mode="after")
+    def validate_order(self) -> Self:
+        if self.min_latitude > self.max_latitude:
+            raise ValueError("min_latitude must be less than or equal to max_latitude")
+        if self.min_longitude > self.max_longitude:
+            raise ValueError(
+                "min_longitude must be less than or equal to max_longitude; "
+                "bounding boxes crossing the antimeridian are not supported"
+            )
+        return self
+
+    def as_geojson_bbox(self) -> tuple[float, float, float, float]:
+        """RFC 7946 order: west, south, east, north."""
+        return (
+            self.min_longitude,
+            self.min_latitude,
+            self.max_longitude,
+            self.max_latitude,
+        )
+
+
+class IssueFilters(BaseModel):
+    """Server-side Issue filters; repeat a list parameter to match any value."""
+
+    issue_type: list[IssueTypeCode] = Field(default_factory=list)
+    severity: list[DetectionSeverity] = Field(default_factory=list)
+    status: list[IssueStatus] = Field(default_factory=list)
+    review_required: bool = False
+    last_seen_after: AwareDatetime | None = None
+    last_seen_before: AwareDatetime | None = None
+
+    @model_validator(mode="after")
+    def validate_last_seen_range(self) -> Self:
+        if (
+            self.last_seen_after is not None
+            and self.last_seen_before is not None
+            and self.last_seen_after > self.last_seen_before
+        ):
+            raise ValueError("last_seen_after must not be later than last_seen_before")
+        return self
+
+
+ISSUE_MAP_DEFAULT_LIMIT = 500
+ISSUE_MAP_MAX_LIMIT = 1000
+
+
+class IssueMapQuery(BoundingBox, IssueFilters):
+    limit: int = Field(default=ISSUE_MAP_DEFAULT_LIMIT, ge=1, le=ISSUE_MAP_MAX_LIMIT)
+
+    def filters(self) -> IssueFilters:
+        return IssueFilters.model_validate(
+            self.model_dump(include=set(IssueFilters.model_fields))
+        )
+
+    def bounding_box(self) -> BoundingBox:
+        return BoundingBox.model_validate(
+            self.model_dump(include=set(BoundingBox.model_fields))
+        )
+
+
+class IssueListQuery(IssueFilters):
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=50, ge=1, le=100)
+    min_latitude: Latitude | None = None
+    min_longitude: Longitude | None = None
+    max_latitude: Latitude | None = None
+    max_longitude: Longitude | None = None
+
+    @model_validator(mode="after")
+    def validate_bounding_box(self) -> Self:
+        self.bounding_box()
+        return self
+
+    def filters(self) -> IssueFilters:
+        return IssueFilters.model_validate(
+            self.model_dump(include=set(IssueFilters.model_fields))
+        )
+
+    def bounding_box(self) -> BoundingBox | None:
+        values = self.model_dump(include=set(BoundingBox.model_fields))
+        provided = [v for v in values.values() if v is not None]
+        if not provided:
+            return None
+        if len(provided) != len(values):
+            raise ValueError(
+                "min_latitude, min_longitude, max_latitude, and max_longitude "
+                "must be provided together"
+            )
+        return BoundingBox.model_validate(values)
+
+
+class IssueSummaryFields(BaseModel):
     issue_id: UUID
+    issue_type_code: str
+    issue_type_name: str
+    severity: str
     status: str
+    review_reason: str | None = None
+    needs_review: bool
+    location_accuracy_m: float | None = Field(default=None, ge=0)
+    first_seen_at: datetime
+    last_seen_at: datetime
+    detection_count: int = Field(ge=0)
+    evidence_thumbnail_url: str | None = Field(
+        default=None,
+        description="Path relative to the API origin for the representative evidence image.",
+    )
+
+
+class IssueDTO(IssueSummaryFields):
+    latitude: Latitude | None = None
+    longitude: Longitude | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class PointGeometry(BaseModel):
+    type: Literal["Point"] = "Point"
+    coordinates: tuple[Longitude, Latitude] = Field(
+        description="[longitude, latitude] per RFC 7946."
+    )
+
+
+class IssueFeature(BaseModel):
+    type: Literal["Feature"] = "Feature"
+    id: UUID
+    geometry: PointGeometry
+    properties: IssueSummaryFields
+
+
+class IssueMapMeta(BaseModel):
+    limit: int = Field(ge=1)
+    returned: int = Field(ge=0)
+    total: int = Field(ge=0, description="Matching located Issues in the viewport.")
+    truncated: bool
+
+
+class IssueFeatureCollection(BaseModel):
+    type: Literal["FeatureCollection"] = "FeatureCollection"
+    bbox: tuple[Longitude, Latitude, Longitude, Latitude]
+    features: list[IssueFeature]
+    meta: IssueMapMeta
 
 
 class RoadDTO(BaseModel):
@@ -134,8 +287,9 @@ class DetectionDTO(BaseModel):
     longitude: float | None = Field(default=None, ge=-180, le=180)
     detected_at: datetime
     issue_id: UUID | None = None
-    # Provisional: the v0-mvp model class ID, not a permanent issue-type ID.
+    # Raw v0-mvp model class ID as predicted, not a canonical issue type.
     issue_type: int | None = None
+    predicted_issue_type_code: str | None = None
     evidence_media: UUID | None = None
     location: DetectionLocation | None = None
     bounding_box: (

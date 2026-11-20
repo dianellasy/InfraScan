@@ -23,6 +23,7 @@ from app.models.base import Base
 
 if TYPE_CHECKING:
     from app.models.inference_job import InferenceJob
+    from app.models.issue import Issue
     from app.models.media import EvidenceMedia
 
 
@@ -66,11 +67,12 @@ def _jsonb() -> JSON:
 class DetectionRecord(Base):
     """One road-damage detection produced by an inference job.
 
-    `issue_type` provisionally stores the v0-mvp model class ID
-    (see `inference/labels.py`), not a permanent domain identifier. The
-    diagram's foreign keys for `issue_id` and `issue_type` are deferred until
-    the `issues` and `issue_types` tables exist; that later migration must
-    define the class-ID mapping and convert stored values.
+    `issue_type` stores the raw v0-mvp model class ID (see
+    `inference/labels.py`), preserved as predicted so classification conflicts
+    within an Issue stay visible. `MODEL_CLASS_ISSUE_TYPES` maps it to a
+    canonical issue type; it deliberately has no foreign key. `issue_id` links
+    the detection to the canonical Issue it supports, or is NULL when the
+    detection has not been assigned to one yet.
 
     `bounding_box` is `[x1, y1, x2, y2]` in pixels of the prediction source
     image at its original dimensions (not normalized YOLO coordinates and not
@@ -110,7 +112,9 @@ class DetectionRecord(Base):
     )
     issue_id: Mapped[UUID | None] = mapped_column(
         Uuid(as_uuid=True),
+        ForeignKey("issues.issue_id", ondelete="RESTRICT"),
         nullable=True,
+        index=True,
     )
     issue_type: Mapped[int] = mapped_column(
         Integer(),
@@ -154,4 +158,8 @@ class DetectionRecord(Base):
     evidence: Mapped[EvidenceMedia | None] = relationship(
         "EvidenceMedia",
         back_populates="detection_records",
+    )
+    issue: Mapped[Issue | None] = relationship(
+        "Issue",
+        back_populates="detections",
     )

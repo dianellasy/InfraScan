@@ -44,13 +44,12 @@ def test_shared_metadata_defines_only_application_tables() -> None:
         "inference_jobs",
         "evidence_media",
         "detection_records",
+        "issue_types",
+        "issues",
     }
     assert "users" not in Base.metadata.tables
     assert "celery_taskmeta" not in Base.metadata.tables
     assert "celery_tasksetmeta" not in Base.metadata.tables
-    # Deferred until their tables exist; no placeholders are declared.
-    assert "issues" not in Base.metadata.tables
-    assert "issue_types" not in Base.metadata.tables
 
 
 def test_input_media_model_columns_and_relationship() -> None:
@@ -258,8 +257,8 @@ def test_alembic_renders_upgrade_and_downgrade_sql_offline() -> None:
     assert "bounding_box JSONB NOT NULL" in sql
     assert "location JSONB," in sql
     assert "confidence DOUBLE PRECISION NOT NULL" in sql
-    assert "REFERENCES issues" not in sql
-    assert "REFERENCES issue_types" not in sql
+    assert "REFERENCES issues (issue_id)" in sql
+    assert "REFERENCES issue_types (code)" in sql
     assert "ADD COLUMN object_storage_key" in sql
     assert sql.count("ADD COLUMN object_storage_key") == 2
     assert "ck_input_media_data_or_object_storage_key" in sql
