@@ -444,7 +444,7 @@ async def submit_inference(
         media_type = (upload.content_type or "").split(";", 1)[0].strip().lower()
         if media_type == "video/mp4":
             await _validate_video(upload)
-        if media_type == "image/jpeg":
+        elif media_type == "image/jpeg":
             await _validate_image(upload)
         else:
             raise _ContractError(
