@@ -102,6 +102,16 @@ def test_audio_is_optional(client, service, a119_seed) -> None:
     assert submit(client, path.read_bytes()).status_code == 202
 
 
+@requires_ffmpeg
+def test_1440p_mp4_is_accepted(client, service, a119_seed) -> None:
+    path, manifest = a119_seed("standard", width=2560, height=1440)
+    response = submit(client, path.read_bytes())
+    assert response.status_code == 202, response.json()
+    metadata = service.calls[0]["metadata"]
+    assert isinstance(metadata, ResolvedVideoSubmission)
+    assert metadata.latitude == pytest.approx(manifest["expected_first_fix"]["latitude"])
+
+
 # --- Metadata ---
 
 
@@ -175,12 +185,12 @@ def test_truncated_mp4_is_invalid_video(client, a119_seed) -> None:
           "-x265-params", "log-level=none", "-tag:v", "hvc1", "-f", "mp4"], 415, "UNSUPPORTED_MEDIA_FORMAT"),
         (["-f", "lavfi", "-i", "testsrc2=size=64x64:rate=60:duration=1", "-c:v", "libx264", "-f", "mp4"],
          422, "INVALID_VIDEO_FRAME_RATE"),
-        (["-f", "lavfi", "-i", "testsrc2=size=2560x1440:rate=1:duration=1", "-c:v", "libx264", "-f", "mp4"],
+        (["-f", "lavfi", "-i", "testsrc2=size=2560x1600:rate=1:duration=1", "-c:v", "libx264", "-f", "mp4"],
          422, "INVALID_VIDEO_DIMENSIONS"),
         (["-f", "lavfi", "-i", "testsrc2=size=64x64:rate=30:duration=1", "-c:v", "libx264", "-f", "mov"],
          415, "UNSUPPORTED_MEDIA_FORMAT"),
     ],
-    ids=["h265", "60fps", "2k", "mov"],
+    ids=["h265", "60fps", "above-1440p", "mov"],
 )
 def test_video_outside_the_contract(client, service, tmp_path: Path, args, status_code, code) -> None:
     clip = ffmpeg_clip(tmp_path / "clip.bin", *args)

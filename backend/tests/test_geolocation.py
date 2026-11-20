@@ -5,7 +5,7 @@ import math
 
 import pytest
 
-from inference.geolocation import CameraProfile, geolocate_detection
+from inference.geolocation import CameraProfile, a119_mini2_1080p_profile, geolocate_detection
 from inference.geolocation.projection import (
     EARTH_RADIUS_M, GroundOffset, offset_to_gps, project_to_ground,
 )
@@ -26,6 +26,16 @@ def test_level_projection_matches_known_ground_point() -> None:
 def test_resizing_full_frame_preserves_ground_offset(sx: float, sy: float) -> None:
     box = [BOX[0] * sx, BOX[1] * sy, BOX[2] * sx, BOX[3] * sy]
     assert project_to_ground(box, int(1000 * sx), int(800 * sy), CAMERA) == GroundOffset(2.5, 5.0)
+
+
+def test_a119_profile_projects_1440p_like_the_same_1080p_box() -> None:
+    profile = a119_mini2_1080p_profile({})
+    box_1080p = [900, 700, 1100, 900]
+    expected = project_to_ground(box_1080p, 1920, 1080, profile)
+    assert expected is not None
+    offset = project_to_ground([v * 4 / 3 for v in box_1080p], 2560, 1440, profile)
+    assert offset.right_m == pytest.approx(expected.right_m)
+    assert offset.forward_m == pytest.approx(expected.forward_m)
 
 
 def test_downward_pitch_intersects_road_at_image_center() -> None:

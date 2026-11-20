@@ -67,6 +67,8 @@ def test_a119_1080p_h264_report_is_accepted() -> None:
     [
         {"width": 1080, "height": 1920},
         {"width": 1280, "height": 720},
+        {"width": 2560, "height": 1440},
+        {"width": 1440, "height": 2560},
         {"profile": "Constrained Baseline"},
         {"profile": "Main"},
         {"pix_fmt": "yuvj420p"},
@@ -84,8 +86,12 @@ def test_accepted_variants(changes: dict) -> None:
         ({"codec_name": "mpeg4"}, "unsupported", "UNSUPPORTED_MEDIA_FORMAT"),
         ({"profile": "High 10", "pix_fmt": "yuv420p10le"}, "unsupported", "UNSUPPORTED_MEDIA_FORMAT"),
         ({"pix_fmt": "yuv422p"}, "unsupported", "UNSUPPORTED_MEDIA_FORMAT"),
-        ({"width": 2560, "height": 1440}, "invalid", "INVALID_VIDEO_DIMENSIONS"),
         ({"width": 1920, "height": 1200}, "invalid", "INVALID_VIDEO_DIMENSIONS"),
+        ({"width": 2304, "height": 1296}, "invalid", "INVALID_VIDEO_DIMENSIONS"),
+        ({"width": 2560, "height": 1600}, "invalid", "INVALID_VIDEO_DIMENSIONS"),
+        ({"width": 2592, "height": 1440}, "invalid", "INVALID_VIDEO_DIMENSIONS"),
+        ({"width": 1440, "height": 2592}, "invalid", "INVALID_VIDEO_DIMENSIONS"),
+        ({"width": 3840, "height": 2160}, "invalid", "INVALID_VIDEO_DIMENSIONS"),
         ({"width": 0}, "invalid", "INVALID_VIDEO"),
         ({"avg_frame_rate": "60/1"}, "invalid", "INVALID_VIDEO_FRAME_RATE"),
         ({"avg_frame_rate": "0/0"}, "invalid", "INVALID_VIDEO_FRAME_RATE"),
@@ -335,13 +341,13 @@ LAVFI = ["-f", "lavfi", "-i", "testsrc2=size=64x64:rate=30:duration=1"]
          "unsupported", "UNSUPPORTED_MEDIA_FORMAT"),
         (["-f", "lavfi", "-i", "testsrc2=size=64x64:rate=60:duration=1", "-c:v", "libx264", "-f", "mp4"],
          "invalid", "INVALID_VIDEO_FRAME_RATE"),
-        (["-f", "lavfi", "-i", "testsrc2=size=2560x1440:rate=1:duration=1", "-c:v", "libx264", "-f", "mp4"],
+        (["-f", "lavfi", "-i", "testsrc2=size=2560x1600:rate=1:duration=1", "-c:v", "libx264", "-f", "mp4"],
          "invalid", "INVALID_VIDEO_DIMENSIONS"),
         (LAVFI + ["-f", "lavfi", "-i", "testsrc2=size=64x64:rate=30:duration=1",
                   "-map", "0", "-map", "1", "-c:v", "libx264", "-f", "mp4"],
          "unsupported", "UNSUPPORTED_MEDIA_FORMAT"),
     ],
-    ids=["h265", "60fps", "2k", "two-video-streams"],
+    ids=["h265", "60fps", "above-1440p", "two-video-streams"],
 )
 def test_real_files_outside_the_contract_are_rejected(
     tmp_path: Path, args: list[str], kind: str, code: str
@@ -350,6 +356,23 @@ def test_real_files_outside_the_contract_are_rejected(
     with pytest.raises(VideoRejected) as caught:
         inspect_video(path)
     assert (caught.value.kind, caught.value.code) == (kind, code)
+
+
+@requires_ffmpeg
+@pytest.mark.parametrize("size", ["2560x1440", "1440x2560"])
+def test_real_1440p_file_is_accepted_and_decoded_at_full_size(tmp_path: Path, size: str) -> None:
+    from PIL import Image
+
+    path = ffmpeg_clip(
+        tmp_path / "clip.mp4", "-f", "lavfi", "-i", f"testsrc2=size={size}:rate=30:duration=1",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-f", "mp4",
+    )
+    info, timeline = inspect_video(path)
+    assert f"{info.width}x{info.height}" == size
+    (out := tmp_path / "frames").mkdir()
+    [frame] = extract_frames(path, info, timeline, timeline.pts[:1], out)
+    with Image.open(frame.path) as image:
+        assert image.size == (info.width, info.height)
 
 
 @requires_ffmpeg
