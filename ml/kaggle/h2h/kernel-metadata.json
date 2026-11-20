@@ -1,0 +1,16 @@
+{
+  "id": "atulchahar/infrascan-v1-h2h",
+  "title": "InfraScan v1 h2h",
+  "code_file": "run.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "machine_shape": "",
+  "dataset_sources": ["atulchahar/infrascan-e7-weights"],
+  "competition_sources": [],
+  "kernel_sources": ["atulchahar/infrascan-v1-prep", "atulchahar/infrascan-v1-main"],
+  "model_sources": []
+}

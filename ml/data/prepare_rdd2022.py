@@ -16,6 +16,13 @@ What it does (all from the real files, nothing assumed):
 7. Counts near-duplicate images across splits with a 64-bit dHash.
 
 Run on Kaggle:  python prepare_rdd2022.py --src /kaggle/input/rdd2022 --out /kaggle/temp/rdd2022_yolo
+
+v1 options (defaults keep the b0 behaviour):
+  --manhole      add class 4 "Manhole cover" from RDD2022 code D50
+  --dup-groups   merge dHash near-duplicates (distance <= 4) into one split group
+  --max-side N   resize images whose long side is above N (b0: 1280)
+  --limit N      only use the first N images per country (smoke tests)
+JPEGs are decoded at reduced scale (PIL draft) where full size is not needed.
 """
 
 import argparse
@@ -111,6 +118,7 @@ def inspect_one(args):
     with Image.open(img_path) as im:
         w, h = im.size
         out["w"], out["h"] = w, h
+        im.draft("RGB", (128, 128))  # fast reduced-scale JPEG decode; only 64x64 and 9x8 are used
         small = im.convert("L").resize((64, 64), Image.BILINEAR)
         out["brightness"] = round(sum(small.getdata()) / (64 * 64), 1)
         out["dhash"] = dhash(im)
@@ -154,6 +162,8 @@ def write_one(args):
     src = Path(rec["img"])
     if max(rec["w"], rec["h"]) > MAX_SIDE:
         with Image.open(src) as im:
+            s0 = MAX_SIDE / max(im.size)
+            im.draft("RGB", (round(im.size[0] * s0), round(im.size[1] * s0)))  # decode at >= target size
             im = im.convert("RGB")
             s = MAX_SIDE / max(im.size)
             im = im.resize((round(im.size[0] * s), round(im.size[1] * s)), Image.LANCZOS)
@@ -166,11 +176,54 @@ def write_one(args):
     lbl_dst.write_text("\n".join(rec["lines"]) + ("\n" if rec["lines"] else ""))
 
 
-def make_split(recs):
+def dup_pairs(recs, max_dist=4):
+    """All pairs (i, j) whose dHash differs by <= max_dist bits (banded search)."""
+    bands = defaultdict(list)
+    for i, r in enumerate(recs):
+        h = r["dhash"]
+        for b in range(8):
+            bands[(b, (h >> (8 * b)) & 0xFF)].append(i)
+    pairs = set()
+    for idx in bands.values():
+        if len(idx) > 400:
+            continue
+        for a in range(len(idx)):
+            for b in range(a + 1, len(idx)):
+                i, j = idx[a], idx[b]
+                if bin(recs[i]["dhash"] ^ recs[j]["dhash"]).count("1") <= max_dist:
+                    pairs.add((min(i, j), max(i, j)))
+    return pairs
+
+
+def block_key(r):
+    return (r["country"], id_of(r["stem"]) // BLOCK)
+
+
+def drop_cross_split_dups(recs):
+    """Mark val/test images that have a near-duplicate in another split as split "drop".
+
+    Merging duplicate groups (union-find) chains almost the whole dataset into one
+    group on RDD2022, so instead we keep the block split and drop the eval-side
+    image of each cross-split pair (for test-val pairs, the val one). Dropping
+    never creates new pairs. Returns the number of dropped images.
+    """
+    rank = {"train": 0, "test": 1, "val": 2}  # drop the higher rank of each pair
+    dropped = 0
+    for i, j in dup_pairs(recs):
+        a, b = recs[i], recs[j]
+        if "drop" in (a["split"], b["split"]) or a["split"] == b["split"]:
+            continue
+        loser = a if rank[a["split"]] > rank[b["split"]] else b
+        loser["split"] = "drop"
+        dropped += 1
+    return dropped
+
+
+def make_split(recs, dup_groups=False):
     rng = random.Random(SEED)
     groups = defaultdict(list)
     for r in recs:
-        groups[(r["country"], id_of(r["stem"]) // BLOCK)].append(r)
+        groups[block_key(r)].append(r)
     by_country = defaultdict(lambda: {True: [], False: []})
     for key, members in groups.items():
         has_pot = any(m["counts"].get("D40", 0) for m in members)
@@ -196,6 +249,9 @@ def make_split(recs):
         for m in members:
             m["split"] = assign[key]
             m["group"] = f"{key[0]}_{key[1]}"
+    if dup_groups:
+        n = drop_cross_split_dups(recs)
+        print(f"dropped {n} val/test images with a near-duplicate in another split")
 
 
 def cross_split_dups(recs, max_dist=4):
@@ -219,19 +275,86 @@ def cross_split_dups(recs, max_dist=4):
     return len(pairs), {f"{a}-{b}": n for (a, b), n in kinds.items()}
 
 
+def set_config(max_side, classes, class_names):
+    """Set config globals (also run in each worker, so spawn-based pools see them)."""
+    global MAX_SIDE, CLASSES, CLASS_NAMES, CLASS_ID
+    MAX_SIDE, CLASSES, CLASS_NAMES = max_side, list(classes), list(class_names)
+    CLASS_ID = {c: i for i, c in enumerate(CLASSES)}
+
+
+def _hash_existing(path):
+    with Image.open(path) as im:
+        im.draft("RGB", (128, 128))
+        return dhash(im)
+
+
+def resplit_existing(data_root, manifest_in, manifest_out, workers=4):
+    """Re-split a prepared dataset in place: b0 block split + drop cross-split dups.
+
+    Reads stem/country/split/D40 from manifest_in, finds each image under
+    images/<old split>/, recomputes dHash, re-assigns splits, moves image and
+    label files, and writes manifest_out with the new split column.
+    """
+    data_root = Path(data_root)
+    with open(manifest_in) as f:
+        rows = list(csv.DictReader(f))
+    for r in rows:
+        r["old"] = r["split"]
+        r["img"] = str(data_root / "images" / r["old"] / f"{r['stem']}.jpg")
+        r["counts"] = {"D40": int(r["D40"])}
+    rows = [r for r in rows if r["old"] != "drop"]
+    with Pool(workers) as pool:
+        hashes = pool.map(_hash_existing, [r["img"] for r in rows], chunksize=64)
+    for r, h in zip(rows, hashes):
+        r["dhash"] = h
+    make_split(rows, dup_groups=True)
+    (data_root / "images" / "drop").mkdir(exist_ok=True)
+    (data_root / "labels" / "drop").mkdir(exist_ok=True)
+    for r in rows:
+        if r["split"] != r["old"]:
+            for kind, ext in (("images", ".jpg"), ("labels", ".txt")):
+                os.replace(data_root / kind / r["old"] / f"{r['stem']}{ext}",
+                           data_root / kind / r["split"] / f"{r['stem']}{ext}")
+    fields = [k for k in rows[0] if k not in ("old", "img", "counts", "dhash")]
+    with open(manifest_out, "w", newline="") as f:
+        wr = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+        wr.writeheader()
+        wr.writerows(sorted(rows, key=lambda r: r["stem"]))
+    counts = Counter((r["country"], r["split"]) for r in rows)
+    n_pairs, kinds = cross_split_dups([r for r in rows if r["split"] != "drop"])
+    return {"per_country_split": {f"{c}/{s}": n for (c, s), n in sorted(counts.items())},
+            "per_split": dict(Counter(r["split"] for r in rows)), "remaining_cross_split_pairs": n_pairs}
+
+
 def main():
+    global MAX_SIDE, CLASSES, CLASS_NAMES, CLASS_ID
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--stats-dir", default=None, help="where stats.json and manifest.csv go (default: --out)")
     ap.add_argument("--workers", type=int, default=4)
+    ap.add_argument("--manhole", action="store_true")
+    ap.add_argument("--dup-groups", action="store_true")
+    ap.add_argument("--max-side", type=int, default=MAX_SIDE)
+    ap.add_argument("--limit", type=int, default=0)
     a = ap.parse_args()
+    if a.manhole:
+        set_config(a.max_side, CLASSES + ["D50"], CLASS_NAMES + ["Manhole cover"])
+    else:
+        set_config(a.max_side, CLASSES, CLASS_NAMES)
+    cfg = (MAX_SIDE, CLASSES, CLASS_NAMES)
     src, out = Path(a.src), Path(a.out)
     stats_dir = Path(a.stats_dir or a.out)
     stats_dir.mkdir(parents=True, exist_ok=True)
 
     items, missing_img = find_items(src)
     print(f"labeled train xml with image: {len(items)}, xml without image: {missing_img}")
+    if a.limit:
+        per = defaultdict(list)
+        for it in items:
+            per[country_of(Path(it[1]).stem)].append(it)
+        items = [it for v in per.values() for it in v[:a.limit]]
+        print(f"--limit {a.limit}: using {len(items)} images")
 
     # test folders: do they have labels?
     test_dirs = sorted({p for p in src.rglob("test") if p.is_dir()})
@@ -242,16 +365,16 @@ def main():
         test_info[str(t.relative_to(src))] = {"images": n_img, "xml": n_xml}
     print("test folders:", json.dumps(test_info, indent=1))
 
-    with Pool(a.workers) as pool:
+    with Pool(a.workers, initializer=set_config, initargs=cfg) as pool:
         recs = pool.map(inspect_one, items, chunksize=64)
 
-    make_split(recs)
+    make_split(recs, dup_groups=a.dup_groups)
 
     for s in ("train", "val", "test"):
         (out / "images" / s).mkdir(parents=True, exist_ok=True)
         (out / "labels" / s).mkdir(parents=True, exist_ok=True)
-    with Pool(a.workers) as pool:
-        pool.map(write_one, [(r, str(out)) for r in recs], chunksize=64)
+    with Pool(a.workers, initializer=set_config, initargs=cfg) as pool:
+        pool.map(write_one, [(r, str(out)) for r in recs if r["split"] != "drop"], chunksize=64)
 
     # data.yaml (path is rewritten by the training script to wherever the data lands)
     (out / "data.yaml").write_text(
@@ -261,7 +384,8 @@ def main():
 
     # stats
     st = {"n_labeled_images": len(recs), "xml_without_image": missing_img, "test_folders": test_info,
-          "seed": SEED, "block": BLOCK, "max_side": MAX_SIDE, "dark_mean_threshold": DARK_MEAN}
+          "seed": SEED, "block": BLOCK, "max_side": MAX_SIDE, "dark_mean_threshold": DARK_MEAN,
+          "classes": CLASSES, "class_names": CLASS_NAMES, "dup_groups": a.dup_groups}
     per_country = defaultdict(lambda: {"images": 0, "sizes": Counter(), "boxes": Counter(),
                                        "images_with_pothole": 0, "empty_images": 0, "dark_images": 0,
                                        "splits": Counter()})
@@ -297,7 +421,7 @@ def main():
     st["box_flags"] = dict(flags)
     bright = sorted(r["brightness"] for r in recs)
     st["brightness_percentiles"] = {p: bright[min(len(bright) - 1, int(p / 100 * len(bright)))] for p in (1, 5, 10, 50, 90)}
-    n_pairs, kinds = cross_split_dups(recs)
+    n_pairs, kinds = cross_split_dups([r for r in recs if r["split"] != "drop"])
     st["near_duplicate_pairs_across_splits"] = {"total": n_pairs, "by_split_pair": kinds, "max_hamming": 4}
 
     (stats_dir / "stats.json").write_text(json.dumps(st, indent=1))
