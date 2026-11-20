@@ -1,0 +1,22 @@
+{
+ "images": 3653,
+ "note": "classes 0-3 only; images in old b0 test AND new v1 test",
+ "b0": {
+  "mAP50_cls0to3": 0.5789,
+  "AP50": {
+   "Longitudinal crack": 0.5837,
+   "Transverse crack": 0.5789,
+   "Alligator crack": 0.6818,
+   "Pothole": 0.4711
+  }
+ },
+ "v1": {
+  "mAP50_cls0to3": 0.5961,
+  "AP50": {
+   "Longitudinal crack": 0.6111,
+   "Transverse crack": 0.6007,
+   "Alligator crack": 0.6783,
+   "Pothole": 0.4943
+  }
+ }
+}

@@ -1,0 +1,39 @@
+{
+ "per_country_split": {
+  "China_Drone/drop": 114,
+  "China_Drone/test": 209,
+  "China_Drone/train": 1891,
+  "China_Drone/val": 187,
+  "China_MotorBike/drop": 108,
+  "China_MotorBike/test": 176,
+  "China_MotorBike/train": 1560,
+  "China_MotorBike/val": 133,
+  "Czech/drop": 27,
+  "Czech/test": 298,
+  "Czech/train": 2247,
+  "Czech/val": 257,
+  "India/drop": 205,
+  "India/test": 711,
+  "India/train": 6146,
+  "India/val": 644,
+  "Japan/drop": 56,
+  "Japan/test": 1044,
+  "Japan/train": 8395,
+  "Japan/val": 1011,
+  "Norway/drop": 233,
+  "Norway/test": 741,
+  "Norway/train": 6480,
+  "Norway/val": 707,
+  "United_States/drop": 22,
+  "United_States/test": 474,
+  "United_States/train": 3810,
+  "United_States/val": 499
+ },
+ "per_split": {
+  "test": 3653,
+  "drop": 765,
+  "train": 30529,
+  "val": 3438
+ },
+ "remaining_cross_split_pairs": 109
+}
