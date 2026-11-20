@@ -30,6 +30,7 @@ class DetectionRecordRepository:
         evidence: EvidenceMedia,
         detections: Sequence[NewDetection],
         detected_at: datetime,
+        frame_timestamp: float | None = None,
     ) -> list[DetectionRecord]:
         records = [
             DetectionRecord(
@@ -40,7 +41,7 @@ class DetectionRecordRepository:
                 severity=detection.severity,
                 bounding_box=list(detection.bounding_box),
                 location=detection.location,
-                frame_timestamp=None,
+                frame_timestamp=frame_timestamp,
                 detected_at=detected_at,
             )
             for detection in detections

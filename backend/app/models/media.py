@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from sqlalchemy import CheckConstraint, ForeignKey, LargeBinary, String, Uuid, text
+from sqlalchemy import CheckConstraint, Double, ForeignKey, LargeBinary, String, Uuid, text
 from sqlalchemy.dialects.postgresql import BYTEA
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -70,6 +70,7 @@ class EvidenceMedia(Base):
 
     __tablename__ = "evidence_media"
     __table_args__ = (
+        CheckConstraint("frame_timestamp >= 0", name="frame_timestamp_nonnegative"),
         CheckConstraint(
             MEDIA_PAYLOAD_CHECK,
             name="data_or_object_storage_key",
@@ -104,6 +105,8 @@ class EvidenceMedia(Base):
         String(),
         nullable=True,
     )
+
+    frame_timestamp: Mapped[float | None] = mapped_column(Double(), nullable=True)
 
     job: Mapped[InferenceJob] = relationship(
         "InferenceJob",

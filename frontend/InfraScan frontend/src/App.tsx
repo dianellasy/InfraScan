@@ -19,6 +19,7 @@ type Detection = {
   latitude: number | null;
   longitude: number | null;
   detected_at: string;
+  frame_timestamp?: number | null;
 };
 
 type Page<T> = {
@@ -27,6 +28,8 @@ type Page<T> = {
 };
 
 const MAX_FILE_SIZE = 5_000_000;
+const MAX_VIDEO_SIZE = 1_000_000_000;
+const mediaLimit = (file: File) => /\.mp4$/i.test(file.name) ? MAX_VIDEO_SIZE : MAX_FILE_SIZE;
 
 function isTerminal(status: string) {
   return ["completed", "complete", "succeeded", "success", "done", "failed", "error", "cancelled"].includes(
@@ -136,18 +139,18 @@ function App() {
     };
   }, [activeJobId]);
 
-  async function submitImages(event: FormEvent<HTMLFormElement>) {
+  async function submitMedia(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!file) {
-      setError("Choose a JPEG image to submit.");
+      setError("Choose a JPEG image or MP4 video to submit.");
       return;
     }
-    if (!/\.jpe?g$/i.test(file.name)) {
-      setError("Choose a .jpg or .jpeg image.");
+    if (!/\.(jpe?g|mp4)$/i.test(file.name)) {
+      setError("Choose a .jpg, .jpeg, or .mp4 file.");
       return;
     }
-    if (file.size > MAX_FILE_SIZE) {
-      setError("The image must be 5,000,000 bytes or smaller.");
+    if (file.size > mediaLimit(file)) {
+      setError("JPEG limit: 5 MB. MP4 limit: 1 GB.");
       return;
     }
     if (!capturedAt) {
@@ -203,7 +206,7 @@ function App() {
       setJob(acceptedJob);
     } catch (submitError) {
       setError(
-        submitError instanceof Error ? submitError.message : "Unable to submit images.",
+        submitError instanceof Error ? submitError.message : "Unable to submit media.",
       );
     } finally {
       setSubmitting(false);
@@ -227,7 +230,7 @@ function App() {
       <section className="intro">
         <p className="eyebrow">IMAGE ANALYSIS</p>
         <h1>Inspect road conditions</h1>
-        <p>Upload road images to detect and review infrastructure issues.</p>
+        <p>Upload road images or videos to detect and review infrastructure issues.</p>
       </section>
 
       {error && (
@@ -245,24 +248,24 @@ function App() {
           <div className="panel-heading">
             <div>
               <p className="eyebrow">NEW SUBMISSION</p>
-              <h2>Upload image</h2>
+              <h2>Upload media</h2>
             </div>
             <span className="step-number">01</span>
           </div>
 
-          <form onSubmit={submitImages}>
+          <form onSubmit={submitMedia}>
             <label className="file-drop">
               <span className="upload-icon" aria-hidden="true">↑</span>
-              <strong>Choose a road image</strong>
-              <span>JPEG (.jpg or .jpeg) · max 5,000,000 bytes · max longest side 4032 px, max shortest side 3024 px</span>
+              <strong>Choose a road image or video</strong>
+              <span>JPEG: 5 MB, up to 4032 × 3024. MP4/H.264: 1 GB, 1080p, 30 fps, 10 minutes. Video locations require a GPS track.</span>
               <input
                 type="file"
-                accept=".jpg,.jpeg,image/jpeg"
+                accept=".jpg,.jpeg,.mp4,image/jpeg,video/mp4"
                 onChange={(event) => {
                   const selectedFile = event.currentTarget.files?.[0] ?? null;
-                  if (selectedFile && selectedFile.size > MAX_FILE_SIZE) {
+                  if (selectedFile && selectedFile.size > mediaLimit(selectedFile)) {
                     setFile(null);
-                    setError("The image must be 5,000,000 bytes or smaller.");
+                    setError("JPEG limit: 5 MB. MP4 limit: 1 GB.");
                     event.currentTarget.value = "";
                     return;
                   }
@@ -274,7 +277,7 @@ function App() {
 
             {file && (
               <div className="selected-files" aria-live="polite">
-                <strong>Image selected</strong>
+                <strong>Media selected</strong>
                 <ul>
                   <li>
                     <span>{file.name}</span>
@@ -363,7 +366,7 @@ function App() {
             </div>
           ) : (
             <p className="empty-state">
-              Submit a JPEG image to start an analysis job. Its status will appear here.
+              Submit a JPEG image or MP4 video to start an analysis job. Its status will appear here.
             </p>
           )}
         </section>
@@ -396,6 +399,7 @@ function App() {
                     <th>Severity</th>
                     <th>Confidence</th>
                     <th>Location</th>
+                    <th>Video time</th>
                     <th>Detected</th>
                   </tr>
                 </thead>
@@ -416,6 +420,7 @@ function App() {
                           ? `${detection.latitude.toFixed(5)}, ${detection.longitude.toFixed(5)}`
                           : "—"}
                       </td>
+                      <td>{detection.frame_timestamp == null ? "—" : `${detection.frame_timestamp.toFixed(2)} s`}</td>
                       <td>{new Date(detection.detected_at).toLocaleString()}</td>
                     </tr>
                   ))}

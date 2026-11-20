@@ -77,10 +77,12 @@ interactive API schema is available at `/docs`.
 as the application service has accepted the job; it does not wait for model
 inference. The request must contain exactly two parts:
 
-- `file`: exactly one nonempty JPEG. The controller validates the actual image,
+- `file`: exactly one nonempty JPEG or MP4/H.264 video. The controller validates the actual media,
   not its extension or declared MIME type. The maximum size is 5,000,000 bytes
   (inclusive), the longest side is at most 4032 pixels, and the shortest side is
-  at most 3024 pixels. EXIF orientation is accounted for.
+  at most 3024 pixels. EXIF orientation is accounted for. Videos may be at most
+  1,000,000,000 bytes, 600 seconds, 30 fps, and 1920 × 1080 in either orientation.
+  MP4 must contain exactly one H.264 video stream; audio is ignored.
 - `metadata`: one JSON-encoded object containing exactly `captured_at`,
   `latitude`, and `longitude`. The timestamp must be an ISO 8601 string with a
   timezone and is normalized to UTC. Latitude is from -90 through 90 and
@@ -115,7 +117,7 @@ codes include `INVALID_MULTIPART`, `UNEXPECTED_MULTIPART_FIELD`,
 `INVALID_CAPTURED_AT`, `INVALID_COORDINATE`, `UNSUPPORTED_REQUEST_MEDIA_TYPE`,
 `UNSUPPORTED_IMAGE_FORMAT`, `INVALID_IMAGE_DIMENSIONS`, `INVALID_IMAGE`,
 `SERVICE_UNAVAILABLE`, `SUBMISSION_DEPENDENCY_UNAVAILABLE`, and
-`INTERNAL_ERROR`.
+`INTERNAL_ERROR`. Video validation also uses `INVALID_VIDEO` and `VIDEO_TOOLS_UNAVAILABLE`.
 
 Authentication is intentionally not enforced in this milestone. The future
 production request will carry `Authorization: Bearer <token>` and the backend
@@ -123,7 +125,8 @@ will derive the authenticated user ID; client-supplied user IDs are rejected as
 unknown metadata.
 
 After validation, the application service creates the input media UUID and
-uploads the JPEG with object key `/input/upload/{media_id}`. It then uses one
+uploads the JPEG with object key `/input/upload/{media_id}` or streams the MP4
+with key `videos/input/{media_id}.mp4`. It then uses one
 database transaction to insert the `InputMedia` metadata and R2 object key and
 create a `pending` `InferenceJob` with `captured_at`, `latitude`, and
 `longitude`. Only after that commit does it publish the Celery task
@@ -243,10 +246,73 @@ requires matching measured intrinsics, mounting height, pitch and heading.
   capture metadata parsing and per-image pose remain deferred. `frame_timestamp`
   is NULL for still images.
 
-The controller bounds reads of the uploaded file, but this is not a
-server-wide request-body limit. Production deployment must separately
-configure limits at the reverse proxy/ASGI server and account for multipart
-parser limits.
+The submission route has a streaming ASGI request-body limit of 1,000,065,536
+bytes, including multipart overhead, enforced even without Content-Length.
+The parser spools large uploads to disk. Video probing copies to a temporary
+seekable file; budget disk for approximately two upload copies plus frame
+output per concurrent job. Proxy request limits and timeouts must also allow
+this upload policy. The body limit applies to `/api/v1/inference/jobs` only.
+
+### R2 video processing and operation
+
+Video jobs use the existing queue and job state machine. Workers download to
+a temporary file with a 1 GB cap. FFprobe reads frame presentation timestamps;
+at most 60 actual frames distributed over the clip are selected. FFmpeg
+decodes those frames to temporary JPEGs, and the existing model processes them
+one at a time. Sample timestamps are relative to the first video frame.
+
+Each selected frame gets an annotated JPEG in
+`videos/evidence/{job_id}/{media_id}.jpg` and an evidence row. Detections store
+that evidence ID and `frame_timestamp`. All frame rows and the completed job
+status commit together. Uploaded evidence is deleted best effort on processing
+or transaction failure. Temporary files are removed on ordinary success/failure.
+
+Still-image geolocation retains its existing behavior. Video latitude/longitude
+submission fields identify the capture origin only: video detection locations
+are NULL until support for a synchronized GPS track is implemented. The current
+version does not track/deduplicate defects across frames or generate an
+annotated video. A completed zero-detection video still has frame evidence.
+
+Compose defaults to two worker processes; set `CELERY_WORKER_CONCURRENCY` to
+change it while accounting for per-job temporary disk and model memory.
+Both Dockerfiles install FFmpeg/FFprobe. R2 requires `R2_BUCKET`, `R2_ENDPOINT`,
+`R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY` in the API and worker environments.
+The adapter uses 8 MiB multipart upload parts with two transfer threads, and
+streams downloads in 1 MiB chunks. Tool metadata output is limited to 4 MiB;
+probe timeouts are 30 seconds for basic metadata and 120 seconds for frame
+inspection/decoding. Clips that exceed those operational timeouts fail even
+when their advertised size/duration is within the format contract.
+
+From the repository root, build/start infrastructure and apply migrations:
+
+```bash
+docker compose up -d --build db rabbitmq api worker
+docker compose exec api alembic upgrade head
+```
+
+The new revision is `c3e5f7a92041` (evidence timestamps), following the existing
+R2 schema revisions. Backfill legacy rows with the commands below. The default
+only counts rows; `--apply` uploads and compares SHA-256 digests before recording
+a key. Original BYTEA payloads are retained, and running it again skips migrated
+rows. Run this while legacy media is not being edited concurrently.
+
+```bash
+docker compose exec api python -m scripts.backfill_r2
+docker compose exec api python -m scripts.backfill_r2 --apply
+```
+
+To submit a video, use the same curl example above with
+`file=@road.mp4;type=video/mp4`. Poll the job and list its detections through the
+existing GET endpoints. Raw media remains private; authenticated delivery URLs
+are not implemented by this change.
+
+An optional live smoke command creates synthetic JPEG/MP4 jobs, waits for the
+real worker, checks database rows and R2 bytes, and deletes its own generated
+rows/objects after success:
+
+```bash
+docker compose exec api python -m scripts.verify_r2_pipeline
+```
 
 ### Database persistence models and migrations
 
@@ -275,7 +341,9 @@ declarative `Base` in `backend/app/models/base.py`:
   `BYTEA`), `content_type`, `filename` (nullable), and `object_storage_key`
   (nullable string referencing an R2 object key). A check constraint requires
   at least one of `data` or `object_storage_key`. All detections from one
-  processed image share one evidence row.
+  processed image share one evidence row. `frame_timestamp` is nullable for
+  images and nonnegative seconds for video evidence, including frames that
+  produce no detections.
 - `DetectionRecord` (`detection_records`): one row per detection. Columns are
   `detection_id` (UUID primary key); `job_id` (required, indexed, non-unique
   foreign key to `inference_jobs`, so one job has zero or more detections);

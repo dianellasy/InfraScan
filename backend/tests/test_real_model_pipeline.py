@@ -58,6 +58,7 @@ def test_service_uses_central_label_map() -> None:
     assert inference.MODEL_VERSION == "v0-mvp"
 
 
+@pytest.mark.skipif(not SMOKE_IMAGE.is_file(), reason="Original multi.png reference fixture is not present")
 def test_real_inference_returns_v0_contract_and_in_memory_evidence() -> None:
     output_mtime = inference.OUTPUT_PATH.stat().st_mtime_ns if inference.OUTPUT_PATH.exists() else None
 
@@ -114,6 +115,7 @@ def test_prediction_source_applies_exif_orientation() -> None:
     assert source.getexif().get(274, 1) == 1
 
 
+@pytest.mark.skipif(not SMOKE_IMAGE.is_file(), reason="Original multi.png reference fixture is not present")
 def test_http_to_celery_worker_to_database_with_real_model(
     session_factory: sessionmaker[Session],
     migrated_engine,

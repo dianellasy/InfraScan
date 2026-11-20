@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, NoReturn
+from typing import Any, BinaryIO, NoReturn
 from uuid import UUID
 
 from fastapi import UploadFile
@@ -111,25 +111,36 @@ class DatabaseInfraScanService:
         self, file: UploadFile, metadata: InferenceSubmissionMetadata
     ) -> InferenceJobAccepted:
         await file.seek(0)
-        data = await file.read()
-        accepted = await run_in_threadpool(
-            self._create_pending_job, data, file.filename, metadata
-        )
+        if file.content_type == "video/mp4":
+            accepted = await run_in_threadpool(
+                self._create_pending_job, file.file, file.filename, metadata, "video/mp4"
+            )
+        else:
+            data = await file.read()
+            accepted = await run_in_threadpool(
+                self._create_pending_job, data, file.filename, metadata
+            )
         await run_in_threadpool(self._publish, accepted.job_id)
         return accepted
 
     def _create_pending_job(
         self,
-        data: bytes,
+        data: bytes | BinaryIO,
         filename: str | None,
         metadata: InferenceSubmissionMetadata,
+        content_type: str = SUBMITTED_CONTENT_TYPE,
     ) -> InferenceJobAccepted:
         media_id = uuid7()
-        object_storage_key = f"{INPUT_MEDIA_OBJECT_KEY_PREFIX}/{media_id}"
+        object_storage_key = (f"videos/input/{media_id}.mp4" if content_type == "video/mp4"
+                              else f"{INPUT_MEDIA_OBJECT_KEY_PREFIX}/{media_id}")
         try:
-            self._media_storage.put(data, object_storage_key, SUBMITTED_CONTENT_TYPE)
+            if content_type == "video/mp4":
+                self._media_storage.put_file(data, object_storage_key, content_type)
+            else:
+                self._media_storage.put(data, object_storage_key, content_type)
         except Exception as exc:
             logger.exception("Could not store input media %s in object storage", media_id)
+            self._delete_uploaded_media(object_storage_key)
             raise SubmissionDependencyUnavailableError from exc
 
         try:
@@ -137,7 +148,7 @@ class DatabaseInfraScanService:
                 media = InputMediaRepository(session).store(
                     media_id,
                     object_storage_key,
-                    SUBMITTED_CONTENT_TYPE,
+                    content_type,
                     filename,
                 )
                 job = InferenceJobRepository(session).create_pending(media, metadata)

@@ -102,6 +102,7 @@ def test_evidence_media_columns() -> None:
         "content_type",
         "filename",
         "object_storage_key",
+        "frame_timestamp",
     }
     assert table.c.media_id.primary_key is True
     assert table.c.job_id.nullable is False
@@ -117,7 +118,7 @@ def test_evidence_media_columns() -> None:
     check_names = {
         c.name for c in table.constraints if isinstance(c, sa.CheckConstraint)
     }
-    assert check_names == {"ck_evidence_media_data_or_object_storage_key"}
+    assert check_names == {"ck_evidence_media_data_or_object_storage_key", "ck_evidence_media_frame_timestamp_nonnegative"}
 
 
 def test_bidirectional_one_to_many_relationships() -> None:
@@ -344,12 +345,12 @@ def test_deleting_job_with_detections_is_restricted(
             session.flush()
 
 
-def test_downgrade_one_revision_restores_required_media_data(
+def test_downgrade_payload_revision_restores_required_media_data(
     disposable_postgres_url: str,
 ) -> None:
     up = run_alembic("upgrade", "head", database_url=disposable_postgres_url)
     assert up.returncode == 0, up.stderr
-    down = run_alembic("downgrade", "-1", database_url=disposable_postgres_url)
+    down = run_alembic("downgrade", "a1c3e5f70829", database_url=disposable_postgres_url)
     assert down.returncode == 0, down.stderr
 
     engine = sa.create_engine(

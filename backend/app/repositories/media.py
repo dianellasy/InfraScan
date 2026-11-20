@@ -43,8 +43,10 @@ class EvidenceMediaRepository:
         object_storage_key: str,
         content_type: str,
         filename: str | None,
+        frame_timestamp: float | None = None,
     ) -> EvidenceMedia:
         evidence = EvidenceMedia(
+            frame_timestamp=frame_timestamp,
             media_id=media_id,
             job_id=job_id,
             data=None,

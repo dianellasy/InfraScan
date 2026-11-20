@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import logging
 import math
+import tempfile
+from pathlib import Path
+from app.services.video import MAX_VIDEO_BYTES, sampled_frames
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -52,6 +55,7 @@ class ClaimedJob:
     filename: str | None
     latitude: float
     longitude: float
+    content_type: str = "image/jpeg"
 
 
 def _utc_now() -> datetime:
@@ -143,6 +147,8 @@ class InferenceJobProcessor:
             raise
         if claimed is None:
             return None
+        if claimed.content_type == "video/mp4":
+            return self._process_video(job_id, claimed)
         try:
             image = self._load_input_media(claimed)
             result, annotated_jpeg = self._run_inference(image, claimed.filename)
@@ -173,6 +179,55 @@ class InferenceJobProcessor:
             len(parsed.detections),
         )
         return InferenceJobStatus.COMPLETED
+
+    def _process_video(self, job_id: UUID, claimed: ClaimedJob) -> InferenceJobStatus:
+        uploaded = []
+        results = []
+        try:
+            if not claimed.object_storage_key:
+                raise RuntimeError("Video input requires an object storage key")
+            with tempfile.TemporaryDirectory(prefix="infrascan-video-") as directory:
+                path = Path(directory) / "input.mp4"
+                with path.open("wb") as target:
+                    self._media_storage.download_to(claimed.object_storage_key, target, MAX_VIDEO_BYTES)
+                for timestamp, jpeg in sampled_frames(path):
+                    output, annotated = self._run_inference(jpeg, f"frame-{timestamp:.6f}.jpg")
+                    parsed = parse_inference_output(output)
+                    width, height = output.get("image_width"), output.get("image_height")
+                    if type(width) is not int or type(height) is not int or min(width, height) <= 0:
+                        raise InferenceOutputError("Prediction dimensions must be positive integers")
+                    # A single submission GPS point cannot locate moving-camera frames.
+                    media_id = uuid7()
+                    key = f"videos/evidence/{job_id}/{media_id}.jpg"
+                    uploaded.append(key)
+                    self._media_storage.put(annotated, key, EVIDENCE_CONTENT_TYPE)
+                    results.append((timestamp, media_id, key, parsed, self._clock()))
+            if not results:
+                raise InferenceOutputError("Video yielded no frames")
+            versions = {row[3].model_version for row in results}
+            if len(versions) != 1:
+                raise InferenceOutputError("Model version changed during video processing")
+            with self._session_factory() as session, session.begin():
+                jobs = InferenceJobRepository(session)
+                job = jobs.get_for_update(job_id)
+                if job is None or job.status != InferenceJobStatus.RUNNING:
+                    raise RuntimeError("job is no longer running")
+                for timestamp, media_id, key, parsed, detected_at in results:
+                    evidence = EvidenceMediaRepository(session).add(
+                        job_id, media_id, key, EVIDENCE_CONTENT_TYPE,
+                        f"frame-{timestamp:.6f}.jpg", frame_timestamp=timestamp,
+                    )
+                    DetectionRecordRepository(session).add_many(
+                        job_id, evidence, parsed.detections, detected_at, frame_timestamp=timestamp
+                    )
+                jobs.mark_completed(job, results[0][3].model_version, completed_at=self._clock())
+            return InferenceJobStatus.COMPLETED
+        except Exception:
+            logger.exception("Video processing failed for job %s", job_id)
+            for key in uploaded:
+                self._delete_uploaded_evidence(key)
+            self._mark_failed(job_id)
+            return InferenceJobStatus.FAILED
 
     def _geolocate(
         self, parsed: ParsedInference, result: Mapping[str, Any], source: ClaimedJob
@@ -213,6 +268,7 @@ class InferenceJobProcessor:
                 filename=job.input_media.filename,
                 latitude=float(job.latitude),
                 longitude=float(job.longitude),
+                content_type=job.input_media.content_type,
             )
 
     def _load_input_media(self, claimed: ClaimedJob) -> bytes:

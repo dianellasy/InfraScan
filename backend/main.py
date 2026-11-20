@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.adapters.celery_queue import CeleryInferenceQueue
 from app.adapters.r2_storage import R2MediaStorageAdapter
 from app.api.errors import register_exception_handlers
+from app.api.upload_limit import UploadLimitMiddleware
 from app.api.v1.router import api_router
 from app.db import create_db_engine, create_session_factory
 from app.services.inference_jobs import DatabaseInfraScanService
@@ -46,6 +47,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH"],
     allow_headers=["*"],
 )
+app.add_middleware(UploadLimitMiddleware)
 register_exception_handlers(app)
 app.include_router(api_router, prefix="/api/v1")
 

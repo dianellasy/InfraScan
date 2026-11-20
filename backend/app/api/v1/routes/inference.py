@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
+
 from app.api.dependencies import get_service
 from app.api.errors import error_response as _error_response
 from app.schemas import (
@@ -31,6 +32,7 @@ from inference.celery.celery_app import celery_app
 router = APIRouter(prefix="/inference", tags=["inference"])
 logger = logging.getLogger(__name__)
 
+MAX_FILE_BYTES = 1_000_000_000
 MAX_IMAGE_BYTES = 5_000_000
 MAX_IMAGE_LONGEST_SIDE = 4032
 MAX_IMAGE_SHORTEST_SIDE = 3024
@@ -311,6 +313,8 @@ def _inspect_jpeg(stream: BinaryIO) -> None:
             "file",
         ) from exc
 
+async def _validate_video(upload: StarletteUploadFile) -> None:
+    pass
 
 async def _validate_image(upload: StarletteUploadFile) -> None:
     try:
@@ -418,7 +422,8 @@ _SUBMISSION_REQUEST_BODY = {
     ),
     responses={
         400: {"model": APIErrorResponse, "description": "Invalid multipart structure"},
-        413: {"model": APIErrorResponse, "description": "File exceeds 5,000,000 bytes"},
+        413: {"model": APIErrorResponse, "description": "File image exceeds 5,000,000 bytes"},
+        403: {"model": APIErrorResponse, "description": "File exceeds 1,000,000,000 bytes "},
         415: {"model": APIErrorResponse, "description": "Unsupported media type"},
         422: {"model": APIErrorResponse, "description": "Invalid file or metadata"},
         500: {"model": APIErrorResponse, "description": "Unexpected internal failure"},
@@ -433,9 +438,19 @@ async def submit_inference(
     request: Request,
     service: InfraScanService | None = Depends(_get_submission_service),
 ) -> InferenceJobAccepted | JSONResponse:
+    
     try:
         upload, metadata = await _parse_multipart_request(request)
-        await _validate_image(upload)
+        media_type = (upload.content_type or "").split(";", 1)[0].strip().lower()
+        if media_type == "video/mp4":
+            await _validate_video(upload)
+        if media_type == "image/jpeg":
+            await _validate_image(upload)
+        else:
+            raise _ContractError(
+                415, "UNSUPPORTED_MEDIA_TYPE",
+                "Upload a JPEG image or MP4 video.", "file"
+            )
     except _ContractError as exc:
         return _error_response(exc.status_code, exc.code, exc.message, exc.field)
 
