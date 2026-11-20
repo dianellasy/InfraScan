@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate} from "react-router-dom";
 import { endpoints } from "../api/endpoints.ts";
 import infrascanLogo from "../assets/infrascan.svg";
+import type { Detection as RegisterDetection } from "./Detections";
 import "../App.css";
 
 type Job = {
@@ -72,7 +73,40 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-function Upload() {
+type UploadProps = {
+  onDetectionsLoaded?: (detections: RegisterDetection[]) => void;
+};
+
+
+function toRegisterDetection(
+  detection: Detection
+): RegisterDetection {
+  const location =
+    detection.latitude != null &&
+    detection.longitude != null
+      ? `${detection.latitude.toFixed(5)}, ${detection.longitude.toFixed(5)}`
+      : "Location unavailable";
+
+  const severity = detection.severity.toLowerCase();
+
+  return {
+    id: detection.detection_id,
+    classification: detection.classification.replaceAll("_", " "),
+    location,
+    source: "Uploaded image",
+    confidence: detection.confidence * 100,
+    severity:
+      severity === "high"
+        ? "High"
+        : severity === "medium"
+          ? "Medium"
+          : "Low",
+    status: "Unreviewed",
+    detectedAt: detection.detected_at,
+  };
+}
+
+function Upload({ onDetectionsLoaded }: UploadProps) {
   // creates a navigate function to redirect user to another page
   const navigate = useNavigate();
   const [file, setFile] = useState<File | null>(null);
@@ -112,6 +146,10 @@ function Upload() {
             if (active) {
               setDetections(page.items);
               setDetectionTotal(page.total);
+
+              onDetectionsLoaded?.(
+                page.items.map(toRegisterDetection)
+              );
             }
             if (active) setLoadingDetections(false);
           } else if (updatedJob.error) {
@@ -137,7 +175,7 @@ function Upload() {
       active = false;
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
-  }, [activeJobId]);
+  }, [activeJobId, onDetectionsLoaded]);
 
   async function submitImages(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -187,6 +225,7 @@ function Upload() {
     setJob(null);
     setDetections([]);
     setDetectionTotal(0);
+    onDetectionsLoaded?.([]);
 
     const metadata = {
       captured_at: capturedDate.toISOString(),
@@ -248,6 +287,15 @@ function Upload() {
         >
           <span aria-hidden="true">→</span>
           Overview
+        </button>
+
+        <button
+          type="button"
+          className="navigation-button"
+          onClick={() => navigate("/detections")}
+        >
+          <span aria-hidden="true">→</span>
+          Detections
         </button>
 
       </nav>
