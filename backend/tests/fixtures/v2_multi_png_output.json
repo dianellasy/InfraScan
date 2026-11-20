@@ -1,0 +1,125 @@
+{
+  "image_width": 886,
+  "image_height": 595,
+  "model_name": "infrascan-yolo26m-rdd2022",
+  "model_version": "v2",
+  "detections": [
+    {
+      "class_ids": 3,
+      "label": "Pothole",
+      "classification": "Pothole",
+      "severity": "critical",
+      "confidence": 0.7222906351089478,
+      "bbox_xyxy": [
+        397.6598205566406,
+        440.0122985839844,
+        624.1536865234375,
+        542.6163940429688
+      ]
+    },
+    {
+      "class_ids": 3,
+      "label": "Pothole",
+      "classification": "Pothole",
+      "severity": "moderate",
+      "confidence": 0.7118915319442749,
+      "bbox_xyxy": [
+        416.11151123046875,
+        269.193603515625,
+        573.6572265625,
+        331.0937194824219
+      ]
+    },
+    {
+      "class_ids": 3,
+      "label": "Pothole",
+      "classification": "Pothole",
+      "severity": "minor",
+      "confidence": 0.5142304301261902,
+      "bbox_xyxy": [
+        387.7698974609375,
+        184.88116455078125,
+        444.3469543457031,
+        214.11251831054688
+      ]
+    },
+    {
+      "class_ids": 3,
+      "label": "Pothole",
+      "classification": "Pothole",
+      "severity": "minor",
+      "confidence": 0.5086475610733032,
+      "bbox_xyxy": [
+        303.2724609375,
+        235.44309997558594,
+        396.8907775878906,
+        272.990478515625
+      ]
+    },
+    {
+      "class_ids": 3,
+      "label": "Pothole",
+      "classification": "Pothole",
+      "severity": "minor",
+      "confidence": 0.4248100817203522,
+      "bbox_xyxy": [
+        503.02484130859375,
+        221.77047729492188,
+        627.3630981445312,
+        262.9507141113281
+      ]
+    },
+    {
+      "class_ids": 3,
+      "label": "Pothole",
+      "classification": "Pothole",
+      "severity": "minor",
+      "confidence": 0.39839377999305725,
+      "bbox_xyxy": [
+        530.2950439453125,
+        183.74813842773438,
+        623.093017578125,
+        214.15248107910156
+      ]
+    },
+    {
+      "class_ids": 3,
+      "label": "Pothole",
+      "classification": "Pothole",
+      "severity": "minor",
+      "confidence": 0.3344968855381012,
+      "bbox_xyxy": [
+        424.0830078125,
+        203.2975616455078,
+        531.107421875,
+        240.991943359375
+      ]
+    },
+    {
+      "class_ids": 3,
+      "label": "Pothole",
+      "classification": "Pothole",
+      "severity": "minor",
+      "confidence": 0.2769969701766968,
+      "bbox_xyxy": [
+        311.4856872558594,
+        211.15109252929688,
+        388.0773010253906,
+        243.6175079345703
+      ]
+    },
+    {
+      "class_ids": 3,
+      "label": "Pothole",
+      "classification": "Pothole",
+      "severity": "minor",
+      "confidence": 0.26962560415267944,
+      "bbox_xyxy": [
+        471.4458923339844,
+        184.7408905029297,
+        514.8113403320312,
+        205.4794464111328
+      ]
+    }
+  ]
+}

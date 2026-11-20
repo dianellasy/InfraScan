@@ -1,0 +1,119 @@
+{
+ "note": "v1 test split, classes 0-3 only; e7 may have trained on some of these images",
+ "India": {
+  "images": 711,
+  "v1_26m_1024": {
+   "mAP50_cls0to3": 0.3608,
+   "AP50": {
+    "Longitudinal crack": 0.301,
+    "Transverse crack": 0.0779,
+    "Alligator crack": 0.6562,
+    "Pothole": 0.4079
+   },
+   "pothole_P_R_at_bestF1": [
+    0.424,
+    0.522
+   ]
+  },
+  "e7_26s_640": {
+   "mAP50_cls0to3": 0.5863,
+   "AP50": {
+    "Longitudinal crack": 0.5538,
+    "Transverse crack": 0.3845,
+    "Alligator crack": 0.7929,
+    "Pothole": 0.6139
+   },
+   "pothole_P_R_at_bestF1": [
+    0.587,
+    0.629
+   ]
+  }
+ },
+ "United_States": {
+  "images": 474,
+  "v1_26m_1024": {
+   "mAP50_cls0to3": 0.6747,
+   "AP50": {
+    "Longitudinal crack": 0.7784,
+    "Transverse crack": 0.7092,
+    "Alligator crack": 0.7253,
+    "Pothole": 0.4859
+   },
+   "pothole_P_R_at_bestF1": [
+    0.503,
+    0.423
+   ]
+  },
+  "e7_26s_640": {
+   "mAP50_cls0to3": 0.7428,
+   "AP50": {
+    "Longitudinal crack": 0.8386,
+    "Transverse crack": 0.7377,
+    "Alligator crack": 0.8402,
+    "Pothole": 0.5545
+   },
+   "pothole_P_R_at_bestF1": [
+    0.733,
+    0.5
+   ]
+  }
+ },
+ "India+US": {
+  "images": 1185,
+  "v1_26m_1024": {
+   "mAP50_cls0to3": 0.6215,
+   "AP50": {
+    "Longitudinal crack": 0.7067,
+    "Transverse crack": 0.6923,
+    "Alligator crack": 0.6763,
+    "Pothole": 0.4107
+   },
+   "pothole_P_R_at_bestF1": [
+    0.569,
+    0.373
+   ]
+  },
+  "e7_26s_640": {
+   "mAP50_cls0to3": 0.7341,
+   "AP50": {
+    "Longitudinal crack": 0.7928,
+    "Transverse crack": 0.7279,
+    "Alligator crack": 0.8057,
+    "Pothole": 0.61
+   },
+   "pothole_P_R_at_bestF1": [
+    0.708,
+    0.493
+   ]
+  }
+ },
+ "all": {
+  "images": 3653,
+  "v1_26m_1024": {
+   "mAP50_cls0to3": 0.5961,
+   "AP50": {
+    "Longitudinal crack": 0.6111,
+    "Transverse crack": 0.6007,
+    "Alligator crack": 0.6783,
+    "Pothole": 0.4943
+   },
+   "pothole_P_R_at_bestF1": [
+    0.608,
+    0.449
+   ]
+  },
+  "e7_26s_640": {
+   "mAP50_cls0to3": 0.4039,
+   "AP50": {
+    "Longitudinal crack": 0.4062,
+    "Transverse crack": 0.3763,
+    "Alligator crack": 0.4982,
+    "Pothole": 0.335
+   },
+   "pothole_P_R_at_bestF1": [
+    0.488,
+    0.368
+   ]
+  }
+ }
+}

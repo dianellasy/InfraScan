@@ -1,0 +1,262 @@
+{
+ "n_labeled_images": 38385,
+ "xml_without_image": 0,
+ "test_folders": {
+  "China_MotorBike/China_MotorBike/test": {
+   "images": 500,
+   "xml": 0
+  },
+  "Czech/Czech/test": {
+   "images": 709,
+   "xml": 0
+  },
+  "India/India/test": {
+   "images": 1959,
+   "xml": 0
+  },
+  "Japan/Japan/test": {
+   "images": 2627,
+   "xml": 0
+  },
+  "Norway/Norway/test": {
+   "images": 2040,
+   "xml": 0
+  },
+  "United_States/United_States/test": {
+   "images": 1200,
+   "xml": 0
+  }
+ },
+ "seed": 42,
+ "block": 30,
+ "max_side": 1024,
+ "dark_mean_threshold": 60,
+ "classes": [
+  "D00",
+  "D10",
+  "D20",
+  "D40",
+  "D50"
+ ],
+ "class_names": [
+  "Longitudinal crack",
+  "Transverse crack",
+  "Alligator crack",
+  "Pothole",
+  "Manhole cover"
+ ],
+ "dup_groups": true,
+ "per_country": {
+  "China_Drone": {
+   "images": 2401,
+   "sizes": {
+    "512x512": 2401
+   },
+   "boxes": {
+    "D10": 1263,
+    "D00": 1426,
+    "D20": 293,
+    "D40": 86
+   },
+   "images_with_pothole": 64,
+   "empty_images": 482,
+   "dark_images": 14,
+   "splits": {
+    "test": 2401
+   }
+  },
+  "China_MotorBike": {
+   "images": 1977,
+   "sizes": {
+    "512x512": 1977
+   },
+   "boxes": {
+    "D20": 641,
+    "D00": 2678,
+    "D40": 235,
+    "D10": 1096
+   },
+   "images_with_pothole": 164,
+   "empty_images": 43,
+   "dark_images": 0,
+   "splits": {
+    "test": 1977
+   }
+  },
+  "Czech": {
+   "images": 2829,
+   "sizes": {
+    "600x600": 2829
+   },
+   "boxes": {
+    "D00": 988,
+    "D40": 197,
+    "D10": 399,
+    "D20": 161
+   },
+   "images_with_pothole": 154,
+   "empty_images": 1757,
+   "dark_images": 0,
+   "splits": {
+    "test": 1796,
+    "train": 910,
+    "val": 123
+   }
+  },
+  "India": {
+   "images": 7706,
+   "sizes": {
+    "720x720": 7706
+   },
+   "boxes": {
+    "D40": 3187,
+    "D00": 1555,
+    "D20": 2021,
+    "D10": 68,
+    "D50": 28
+   },
+   "images_with_pothole": 1530,
+   "empty_images": 4465,
+   "dark_images": 9,
+   "splits": {
+    "test": 7635,
+    "train": 71
+   }
+  },
+  "Japan": {
+   "images": 10506,
+   "sizes": {
+    "600x600": 10187,
+    "1024x1024": 147,
+    "540x540": 124,
+    "1080x1080": 48
+   },
+   "boxes": {
+    "D20": 6198,
+    "D40": 2243,
+    "D10": 3979,
+    "D00": 4049,
+    "D50": 3553
+   },
+   "images_with_pothole": 1390,
+   "empty_images": 1850,
+   "dark_images": 84,
+   "splits": {
+    "train": 5377,
+    "test": 4449,
+    "val": 680
+   }
+  },
+  "Norway": {
+   "images": 8161,
+   "sizes": {
+    "4040x2035": 4342,
+    "3643x2041": 2896,
+    "3650x2044": 923
+   },
+   "boxes": {
+    "D00": 8570,
+    "D20": 468,
+    "D40": 461,
+    "D10": 1730
+   },
+   "images_with_pothole": 256,
+   "empty_images": 5247,
+   "dark_images": 4,
+   "splits": {
+    "test": 8161
+   }
+  },
+  "United_States": {
+   "images": 4805,
+   "sizes": {
+    "640x640": 4805
+   },
+   "boxes": {
+    "D10": 3295,
+    "D00": 6750,
+    "D20": 834,
+    "D40": 135
+   },
+   "images_with_pothole": 116,
+   "empty_images": 0,
+   "dark_images": 0,
+   "splits": {
+    "test": 2460,
+    "train": 2075,
+    "val": 270
+   }
+  }
+ },
+ "per_split": {
+  "test": {
+   "images": 28879,
+   "boxes": {
+    "D10": 7758,
+    "D00": 19991,
+    "D20": 6546,
+    "D40": 5112,
+    "D50": 1540
+   },
+   "images_with_pothole": 2742,
+   "empty_images": 12124
+  },
+  "train": {
+   "images": 8433,
+   "boxes": {
+    "D00": 5332,
+    "D10": 3593,
+    "D20": 3592,
+    "D40": 1277,
+    "D50": 1832
+   },
+   "images_with_pothole": 829,
+   "empty_images": 1534
+  },
+  "val": {
+   "images": 1073,
+   "boxes": {
+    "D00": 693,
+    "D20": 478,
+    "D10": 479,
+    "D40": 155,
+    "D50": 209
+   },
+   "images_with_pothole": 103,
+   "empty_images": 186
+  }
+ },
+ "total_boxes": {
+  "D10": 11830,
+  "D00": 26016,
+  "D20": 10616,
+  "D40": 6544,
+  "D50": 3581
+ },
+ "images_with_pothole": 3674,
+ "other_labels_dropped": {
+  "D44": 5057,
+  "Repair": 1046,
+  "D43": 793,
+  "D01": 179,
+  "D11": 45,
+  "Block crack": 3,
+  "D0w0": 1
+ },
+ "box_flags": {
+  "zero_size_dropped": 1,
+  "tiny_kept": 340
+ },
+ "brightness_percentiles": {
+  "1": 67.3,
+  "5": 82.4,
+  "10": 94.2,
+  "50": 127.6,
+  "90": 164.0
+ },
+ "near_duplicate_pairs_across_splits": {
+  "total": 0,
+  "by_split_pair": {},
+  "max_hamming": 4
+ }
+}

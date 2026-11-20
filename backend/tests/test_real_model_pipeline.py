@@ -1,4 +1,4 @@
-"""Real shipped-model (v1) path. Skipped unless ultralytics and the weights are available.
+"""Real shipped-model (v2) path. Skipped unless ultralytics and the weights are available.
 
 Unlike `test_inference_workflow.py`, nothing here mocks the model: these
 tests load `inference/weights/best.pt` and run YOLO on CPU.
@@ -27,7 +27,7 @@ from inference.labels import CLASS_LABELS  # noqa: E402
 if not Path(inference.DEFAULT_WEIGHT_PATH).is_file():
     pytest.skip("Shipped model weights are missing", allow_module_level=True)
 
-FIXTURE_PATH = Path(__file__).parent / "fixtures" / "v1_multi_png_output.json"
+FIXTURE_PATH = Path(__file__).parent / "fixtures" / "v2_multi_png_output.json"
 SMOKE_IMAGE = Path(inference.DEFAULT_IMAGE_PATH)
 DETECTION_KEYS = {"class_ids", "label", "classification", "severity", "confidence", "bbox_xyxy"}
 
@@ -40,8 +40,8 @@ def _jpeg(image: Image.Image) -> bytes:
 
 def test_service_uses_central_label_map() -> None:
     assert inference.label_map is CLASS_LABELS
-    assert inference.MODEL_NAME == "infrascan-yolo26s-rdd2022-cmird"
-    assert inference.MODEL_VERSION == "v1"
+    assert inference.MODEL_NAME == "infrascan-yolo26m-rdd2022"
+    assert inference.MODEL_VERSION == "v2"
 
 
 def test_real_inference_returns_v0_contract_and_in_memory_evidence() -> None:
@@ -53,7 +53,7 @@ def test_real_inference_returns_v0_contract_and_in_memory_evidence() -> None:
 
     assert set(result) == {"image_width", "image_height", "model_name", "model_version", "detections"}
     assert (result["image_width"], result["image_height"]) == (886, 595)
-    assert result["model_version"] == "v1"
+    assert result["model_version"] == "v2"
     assert result["detections"]
     for detection in result["detections"]:
         assert set(detection) == DETECTION_KEYS
@@ -153,7 +153,7 @@ def test_http_to_celery_worker_to_database_with_real_model(
         database.dispose_engine()
 
     assert job["status"] == "completed"
-    assert job["model_version"] == "v1"
+    assert job["model_version"] == "v2"
     assert detections["total"] == len(detections["items"]) > 0
     evidence_ids = {d["evidence_media"] for d in detections["items"]}
     assert len(evidence_ids) == 1 and None not in evidence_ids
