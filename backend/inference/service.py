@@ -16,15 +16,14 @@ from inference.labels import CLASS_LABELS, class_label
 label_map = CLASS_LABELS
 
 # Which model made a detection. Update both when weights/best.pt changes.
-# v2 = YOLO26m at 1024 px, all 7 RDD2022 countries, 5 classes (adds Manhole cover).
-# Previous: v1 (e7, YOLO26s, commit 0e1dce4), v0-mvp (YOLO11s, commit c4bfda1). See ml/MODEL_CARD.md.
-MODEL_NAME = "infrascan-yolo26m-rdd2022"
-MODEL_VERSION = "v2"
+# v1 = run e7 (YOLO26s, RDD2022 India+US + CMIRD Indian motorbike frames), see ml/MODEL_CARD.md.
+MODEL_NAME = "infrascan-yolo26s-rdd2022-cmird"
+MODEL_VERSION = "v1"
 
 # Detections below this confidence are dropped. See ml/MODEL_CARD.md for the
 # precision and recall you get at each threshold.
 CONF_THRESHOLD = float(os.environ.get("INFRASCAN_CONF", 0.25))
-IMG_SIZE = 1024
+IMG_SIZE = 640
 
 # Optional lighting normalization (CLAHE). Off by default until tests show it helps.
 USE_CLAHE = os.environ.get("INFRASCAN_CLAHE", "0") == "1"
@@ -54,8 +53,6 @@ def severity_heuristic(class_id: int, box_area_fraction: float) -> str:
     Severity from the box area as a share of the whole image, plus the class.
     Change the cut points here only; nothing else depends on them.
     """
-    if class_id == 4:  # manhole cover: the model sees a cover, not whether it is open or broken
-        return "minor"
     if class_id == 3:  # pothole
         if box_area_fraction < 0.01:
             return "minor"
