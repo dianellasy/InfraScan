@@ -1,6 +1,9 @@
-best.pt = infrascan-rdd2022-yolo11s, version v0-mvp (11 Nov 2026).
-YOLO11s trained on RDD2022 (4 classes, order: 0 Longitudinal crack,
-1 Transverse crack, 2 Alligator crack, 3 Pothole). Input size 640.
-Pothole at confidence 0.25 on our test split: precision 0.645, recall 0.393.
+best.pt = infrascan-yolo26m-rdd2022, version v2 (trained 19-20 Nov 2026, run v1_yolo26m_1024).
+YOLO26m, input size 1024, all 7 RDD2022 countries, 5 classes, order:
+0 Longitudinal crack, 1 Transverse crack, 2 Alligator crack, 3 Pothole, 4 Manhole cover.
+Needs Ultralytics with YOLO26 support (trained and tested with 8.4.210).
+Test split: mAP50 0.651; pothole at confidence 0.25 precision 0.62, recall 0.43.
 This does NOT meet the PRD pothole target (90% precision, 85% recall).
-Full numbers and limits: ml/MODEL_CARD.md
+CPU (i5-8365U): about 1.2 to 1.4 s per image at 1024.
+Previous models: v1 e7 (YOLO26s, commit 0e1dce4), v0-mvp (YOLO11s, commit c4bfda1).
+Full numbers, the comparison with e7, and limits: ml/MODEL_CARD_V2.md
