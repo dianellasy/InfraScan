@@ -1,0 +1,47 @@
+{
+  "image_width": 886,
+  "image_height": 595,
+  "model_name": "infrascan-yolo26s-rdd2022-cmird",
+  "model_version": "v1",
+  "detections": [
+    {
+      "class_ids": 3,
+      "label": "Pothole",
+      "classification": "Pothole",
+      "severity": "minor",
+      "confidence": 0.691819965839386,
+      "bbox_xyxy": [
+        387.1065979003906,
+        184.8995361328125,
+        447.9105224609375,
+        211.86756896972656
+      ]
+    },
+    {
+      "class_ids": 3,
+      "label": "Pothole",
+      "classification": "Pothole",
+      "severity": "critical",
+      "confidence": 0.4243469834327698,
+      "bbox_xyxy": [
+        363.9414978027344,
+        432.8431701660156,
+        632.0045166015625,
+        587.6644897460938
+      ]
+    },
+    {
+      "class_ids": 3,
+      "label": "Pothole",
+      "classification": "Pothole",
+      "severity": "moderate",
+      "confidence": 0.3930342495441437,
+      "bbox_xyxy": [
+        419.0048828125,
+        265.32073974609375,
+        586.3807373046875,
+        338.4501953125
+      ]
+    }
+  ]
+}
