@@ -132,15 +132,15 @@ The same endpoint accepts one dashcam clip. The media type is decided from the
 file bytes (an ISO Base Media `ftyp` box), never from the filename or the
 declared MIME type; browser-side extension checks are only a convenience.
 
-**Required camera settings:** MP4 container, H.264 codec, `1920x1080`
-(1080P), `30 fps`, GPS on (wait for a satellite fix), loop recording of
-10 minutes or less. The camera's other modes (2K, 60 fps, H.265) are rejected
-cleanly rather than accepted and failed later.
+**Required camera settings:** MP4 container, H.264 codec, `2560x1440`
+(1440P) or `1920x1080` (1080P), `30 fps`, GPS on (wait for a satellite fix),
+loop recording of 10 minutes or less. The camera's other modes (60 fps, H.265)
+are rejected cleanly rather than accepted and failed later.
 
 - `file`: nonempty ISO Base Media MP4 of at most 1,000,000,000 bytes
   (inclusive); duration greater than 0 and at most 600 s (0.5 s container
   rounding tolerance); exactly one H.264 video stream (Constrained Baseline,
-  Baseline, Main, or High; 8-bit 4:2:0 `yuv420p`/`yuvj420p`) within 1920x1080
+  Baseline, Main, or High; 8-bit 4:2:0 `yuv420p`/`yuvj420p`) within 2560x1440
   in either orientation; average frame rate and the densest 1-second packet
   window both at most 30 fps; audio optional and ignored; an embedded A119
   Novatek `freeGPS` track with at least one active fix. QuickTime (`qt  `
@@ -163,7 +163,7 @@ curl --request POST http://localhost:8000/api/v1/inference/jobs \
 | 413 | `FILE_TOO_LARGE` | Request body or file over the 1,000,000,000-byte limit (with or without `Content-Length`) |
 | 415 | `UNSUPPORTED_MEDIA_FORMAT` | Not MP4 bytes, QuickTime, H.265 or another codec, unsupported profile/pixel format, or more than one video stream |
 | 422 | `INVALID_VIDEO` | Corrupt, truncated, or undecodable MP4 |
-| 422 | `INVALID_VIDEO_DIMENSIONS` | Larger than 1920x1080 |
+| 422 | `INVALID_VIDEO_DIMENSIONS` | Larger than 2560x1440 |
 | 422 | `INVALID_VIDEO_FRAME_RATE` | Above 30 fps on average or in any 1-second window |
 | 422 | `INVALID_VIDEO_DURATION` | Zero or over 600 s |
 | 422 | `MISSING_GPS_TRACK` | No A119 GPS records, or no usable active fix (all void/invalid) |
@@ -388,7 +388,9 @@ Video detections use `provisional-viofo-a119-mini2-1080p`
 point at the image center, and `fx = fy ≈ 401 px` derived from the published
 140° diagonal field of view as if the lens were an ideal pinhole. The real lens
 is a distorting wide-angle lens, so this is an approximation, not a
-calibration. Mounting defaults are 1.3 m height, 10° pitch down, and a 60 m
+calibration. 1440P clips reuse this profile with intrinsics scaled by 4/3,
+which assumes the camera's 1440P and 1080P modes have the same field of view
+(unverified on hardware). Mounting defaults are 1.3 m height, 10° pitch down, and a 60 m
 range; override them with `INFRASCAN_A119_FX_PX`, `INFRASCAN_A119_FY_PX`,
 `INFRASCAN_A119_MOUNT_HEIGHT_M`, `INFRASCAN_A119_PITCH_DOWN_DEG`, and
 `INFRASCAN_A119_MAX_GROUND_DISTANCE_M`. Projected pothole coordinates are not
