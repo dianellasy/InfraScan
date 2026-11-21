@@ -29,8 +29,6 @@ MAX_DURATION_SECONDS = 600.0
 DURATION_TOLERANCE_SECONDS = 0.5
 MAX_LONG_SIDE = 1920
 MAX_SHORT_SIDE = 1080
-# The camera's 1440P mode is accepted only at exactly this size, in either orientation.
-EXACT_1440P_SIDES = (2560, 1440)
 MAX_FPS = 30
 # One frame of timestamp jitter is tolerated inside any 1-second window.
 MAX_FRAMES_PER_SECOND_WINDOW = MAX_FPS + 1
@@ -243,14 +241,10 @@ def evaluate_probe(report: object) -> VideoInfo:
     width, height = stream.get("width"), stream.get("height")
     if type(width) is not int or type(height) is not int or min(width, height) <= 0:
         raise _corrupt()
-    long_side, short_side = max(width, height), min(width, height)
-    if (long_side, short_side) != EXACT_1440P_SIDES and (
-        long_side > MAX_LONG_SIDE or short_side > MAX_SHORT_SIDE
-    ):
+    if max(width, height) > MAX_LONG_SIDE or min(width, height) > MAX_SHORT_SIDE:
         raise _invalid(
             "INVALID_VIDEO_DIMENSIONS",
-            "Video must be at most 1920x1080 or exactly 2560x1440; "
-            "set the camera to 1080P or 1440P.",
+            "Video must be at most 1920x1080; set the camera to 1080P.",
         )
 
     duration = _finite_float(fmt.get("duration"))

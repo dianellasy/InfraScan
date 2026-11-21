@@ -133,18 +133,15 @@ file bytes (an ISO Base Media `ftyp` box), never from the filename or the
 declared MIME type; browser-side extension checks are only a convenience.
 
 **Required camera settings:** MP4 container, H.264 codec, `1920x1080`
-(1080P) or `2560x1440` (1440P), `30 fps`, GPS on (wait for a satellite fix),
-loop recording of 10 minutes or less. The camera's other modes (60 fps, H.265,
-other resolutions above 1080P) are rejected cleanly rather than accepted and
-failed later. 1440P geolocation is provisional until that mode is calibrated
-(see [Provisional A119 Mini 2 camera profile](#provisional-a119-mini-2-camera-profile)).
+(1080P), `30 fps`, GPS on (wait for a satellite fix), loop recording of
+10 minutes or less. The camera's other modes (2K, 60 fps, H.265) are rejected
+cleanly rather than accepted and failed later.
 
 - `file`: nonempty ISO Base Media MP4 of at most 1,000,000,000 bytes
   (inclusive); duration greater than 0 and at most 600 s (0.5 s container
   rounding tolerance); exactly one H.264 video stream (Constrained Baseline,
-  Baseline, Main, or High; 8-bit 4:2:0 `yuv420p`/`yuvj420p`) within 1920x1080,
-  or exactly 2560x1440, in either orientation (1920x1200, for example, is
-  rejected); average frame rate and the densest 1-second packet
+  Baseline, Main, or High; 8-bit 4:2:0 `yuv420p`/`yuvj420p`) within 1920x1080
+  in either orientation; average frame rate and the densest 1-second packet
   window both at most 30 fps; audio optional and ignored; an embedded A119
   Novatek `freeGPS` track with at least one active fix. QuickTime (`qt  `
   brand) files are rejected.
@@ -166,7 +163,7 @@ curl --request POST http://localhost:8000/api/v1/inference/jobs \
 | 413 | `FILE_TOO_LARGE` | Request body or file over the 1,000,000,000-byte limit (with or without `Content-Length`) |
 | 415 | `UNSUPPORTED_MEDIA_FORMAT` | Not MP4 bytes, QuickTime, H.265 or another codec, unsupported profile/pixel format, or more than one video stream |
 | 422 | `INVALID_VIDEO` | Corrupt, truncated, or undecodable MP4 |
-| 422 | `INVALID_VIDEO_DIMENSIONS` | Larger than 1920x1080 and not exactly 2560x1440 |
+| 422 | `INVALID_VIDEO_DIMENSIONS` | Larger than 1920x1080 |
 | 422 | `INVALID_VIDEO_FRAME_RATE` | Above 30 fps on average or in any 1-second window |
 | 422 | `INVALID_VIDEO_DURATION` | Zero or over 600 s |
 | 422 | `MISSING_GPS_TRACK` | No A119 GPS records, or no usable active fix (all void/invalid) |
@@ -396,14 +393,6 @@ range; override them with `INFRASCAN_A119_FX_PX`, `INFRASCAN_A119_FY_PX`,
 `INFRASCAN_A119_MOUNT_HEIGHT_M`, `INFRASCAN_A119_PITCH_DOWN_DEG`, and
 `INFRASCAN_A119_MAX_GROUND_DISTANCE_M`. Projected pothole coordinates are not
 hardware-calibrated until real footage is measured.
-
-2560 × 1440 (1440P) clips use the same profile. The projection scales the
-intrinsics to the frame size (4/3 on both axes, since both modes are 16:9),
-which is only correct if 1440P records the same field of view as 1080P with no
-crop or digital zoom. That has not been checked on hardware, so 1440P
-geolocation is provisional until the 1440P mode is calibrated. The `fx`/`fy`
-overrides above are in 1920 × 1080 pixels for both modes. Detection runs at the
-model's fixed input size in either mode; no transcoding is done.
 
 ### Synthetic A119 Mini 2-like seed clip
 
@@ -952,7 +941,7 @@ database volume, run `docker compose down --volumes`.
 
 ## Initial Supported Devices/Media File Format for Happy-Path Development
 - JPEG -> Image file should contain GPS coordinates and specific camera specs (will specify soon)
-- MP4 -> VIOFO A119 Mini 2 at 1080p30 or 1440p30 H.264 with GPS on (see
+- MP4 -> VIOFO A119 Mini 2 at 1080p30 H.264 with GPS on (see
   [the MP4 contract](#viofo-a119-mini-2-mp4-submission-contract)); parsing is
   validated against synthetic clips and a public sample only, not yet against
   a clip recorded for this project
