@@ -27,8 +27,8 @@ MAX_VIDEO_BYTES = 1_000_000_000
 MAX_DURATION_SECONDS = 600.0
 # Container durations can round slightly past a camera's 10-minute loop.
 DURATION_TOLERANCE_SECONDS = 0.5
-MAX_LONG_SIDE = 1920
-MAX_SHORT_SIDE = 1080
+MAX_LONG_SIDE = 2560
+MAX_SHORT_SIDE = 1440
 MAX_FPS = 30
 # One frame of timestamp jitter is tolerated inside any 1-second window.
 MAX_FRAMES_PER_SECOND_WINDOW = MAX_FPS + 1
@@ -244,7 +244,7 @@ def evaluate_probe(report: object) -> VideoInfo:
     if max(width, height) > MAX_LONG_SIDE or min(width, height) > MAX_SHORT_SIDE:
         raise _invalid(
             "INVALID_VIDEO_DIMENSIONS",
-            "Video must be at most 1920x1080; set the camera to 1080P.",
+            "Video must be at most 2560x1440; set the camera to 1440P or 1080P.",
         )
 
     duration = _finite_float(fmt.get("duration"))

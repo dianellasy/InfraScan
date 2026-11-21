@@ -73,6 +73,8 @@ PROTOTYPE_HEADING_DEG = 0.0
 # whose horizontal/vertical intrinsics have not been measured, and mount
 # height/pitch depend on the vehicle. Projected detection coordinates from
 # this profile are approximations until real footage is calibrated.
+# 2560x1440 frames are projected by scaling these intrinsics, which assumes
+# the 1440P mode has the same field of view as 1080P.
 A119_MINI2_DIAGONAL_FOV_DEG = 140.0
 A119_MINI2_WIDTH = 1920
 A119_MINI2_HEIGHT = 1080

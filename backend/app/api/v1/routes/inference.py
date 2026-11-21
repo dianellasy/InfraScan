@@ -532,7 +532,7 @@ _SUBMISSION_REQUEST_BODY = {
                             "ISO Base Media file of at most 1,000,000,000 bytes; "
                             "duration above 0 and at most 600 s (0.5 s container "
                             "rounding tolerance); exactly one 8-bit 4:2:0 H.264 "
-                            "video stream within 1920x1080 in either orientation; "
+                            "video stream within 2560x1440 in either orientation; "
                             "average and peak frame rate at most 30 fps; audio "
                             "optional and ignored; an embedded A119 Novatek "
                             "freeGPS track with at least one active fix."
@@ -578,7 +578,7 @@ _ERROR_CODES = {
         "UNKNOWN_METADATA_FIELD, MISSING_METADATA_FIELD, INVALID_CAPTURED_AT, "
         "INVALID_COORDINATE, INVALID_IMAGE, INVALID_IMAGE_DIMENSIONS, "
         "INVALID_VIDEO (corrupt or undecodable MP4), INVALID_VIDEO_DIMENSIONS "
-        "(over 1920x1080), INVALID_VIDEO_FRAME_RATE (over 30 fps), "
+        "(over 2560x1440), INVALID_VIDEO_FRAME_RATE (over 30 fps), "
         "INVALID_VIDEO_DURATION (empty or over 10 minutes), MISSING_GPS_TRACK "
         "(no usable A119 GPS fix)"
     ),

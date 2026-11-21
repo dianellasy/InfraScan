@@ -12,6 +12,7 @@ from fractions import Fraction
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from a119_seed_support import ffmpeg_clip, requires_ffmpeg
 from app.api.video_validation import (
@@ -67,6 +68,8 @@ def test_a119_1080p_h264_report_is_accepted() -> None:
     [
         {"width": 1080, "height": 1920},
         {"width": 1280, "height": 720},
+        {"width": 2560, "height": 1440},
+        {"width": 1440, "height": 2560},
         {"profile": "Constrained Baseline"},
         {"profile": "Main"},
         {"pix_fmt": "yuvj420p"},
@@ -84,8 +87,9 @@ def test_accepted_variants(changes: dict) -> None:
         ({"codec_name": "mpeg4"}, "unsupported", "UNSUPPORTED_MEDIA_FORMAT"),
         ({"profile": "High 10", "pix_fmt": "yuv420p10le"}, "unsupported", "UNSUPPORTED_MEDIA_FORMAT"),
         ({"pix_fmt": "yuv422p"}, "unsupported", "UNSUPPORTED_MEDIA_FORMAT"),
-        ({"width": 2560, "height": 1440}, "invalid", "INVALID_VIDEO_DIMENSIONS"),
-        ({"width": 1920, "height": 1200}, "invalid", "INVALID_VIDEO_DIMENSIONS"),
+        ({"width": 3840, "height": 2160}, "invalid", "INVALID_VIDEO_DIMENSIONS"),
+        ({"width": 2880, "height": 1440}, "invalid", "INVALID_VIDEO_DIMENSIONS"),
+        ({"width": 2560, "height": 1600}, "invalid", "INVALID_VIDEO_DIMENSIONS"),
         ({"width": 0}, "invalid", "INVALID_VIDEO"),
         ({"avg_frame_rate": "60/1"}, "invalid", "INVALID_VIDEO_FRAME_RATE"),
         ({"avg_frame_rate": "0/0"}, "invalid", "INVALID_VIDEO_FRAME_RATE"),
@@ -324,6 +328,19 @@ def test_upload_validation_derives_submission_from_first_fix(a119_seed) -> None:
     assert first.latitude == pytest.approx(manifest["expected_first_fix"]["latitude"])
 
 
+@requires_ffmpeg
+def test_1440p_seed_validates_and_decodes_full_size_frames(a119_seed, tmp_path: Path) -> None:
+    path, _ = a119_seed("standard", seconds=2, width=2560, height=1440)
+    with open(path, "rb") as source:
+        validated = validate_video_upload(source, -480)
+    assert (validated.info.width, validated.info.height) == (2560, 1440)
+
+    info, timeline = inspect_video(path)
+    frames = extract_frames(path, info, timeline, [timeline.pts[0]], tmp_path)
+    with Image.open(frames[0].path) as frame:
+        assert frame.size == (2560, 1440)
+
+
 LAVFI = ["-f", "lavfi", "-i", "testsrc2=size=64x64:rate=30:duration=1"]
 
 
@@ -335,13 +352,13 @@ LAVFI = ["-f", "lavfi", "-i", "testsrc2=size=64x64:rate=30:duration=1"]
          "unsupported", "UNSUPPORTED_MEDIA_FORMAT"),
         (["-f", "lavfi", "-i", "testsrc2=size=64x64:rate=60:duration=1", "-c:v", "libx264", "-f", "mp4"],
          "invalid", "INVALID_VIDEO_FRAME_RATE"),
-        (["-f", "lavfi", "-i", "testsrc2=size=2560x1440:rate=1:duration=1", "-c:v", "libx264", "-f", "mp4"],
+        (["-f", "lavfi", "-i", "testsrc2=size=3840x2160:rate=1:duration=1", "-c:v", "libx264", "-f", "mp4"],
          "invalid", "INVALID_VIDEO_DIMENSIONS"),
         (LAVFI + ["-f", "lavfi", "-i", "testsrc2=size=64x64:rate=30:duration=1",
                   "-map", "0", "-map", "1", "-c:v", "libx264", "-f", "mp4"],
          "unsupported", "UNSUPPORTED_MEDIA_FORMAT"),
     ],
-    ids=["h265", "60fps", "2k", "two-video-streams"],
+    ids=["h265", "60fps", "4k", "two-video-streams"],
 )
 def test_real_files_outside_the_contract_are_rejected(
     tmp_path: Path, args: list[str], kind: str, code: str

@@ -175,12 +175,12 @@ def test_truncated_mp4_is_invalid_video(client, a119_seed) -> None:
           "-x265-params", "log-level=none", "-tag:v", "hvc1", "-f", "mp4"], 415, "UNSUPPORTED_MEDIA_FORMAT"),
         (["-f", "lavfi", "-i", "testsrc2=size=64x64:rate=60:duration=1", "-c:v", "libx264", "-f", "mp4"],
          422, "INVALID_VIDEO_FRAME_RATE"),
-        (["-f", "lavfi", "-i", "testsrc2=size=2560x1440:rate=1:duration=1", "-c:v", "libx264", "-f", "mp4"],
+        (["-f", "lavfi", "-i", "testsrc2=size=3840x2160:rate=1:duration=1", "-c:v", "libx264", "-f", "mp4"],
          422, "INVALID_VIDEO_DIMENSIONS"),
         (["-f", "lavfi", "-i", "testsrc2=size=64x64:rate=30:duration=1", "-c:v", "libx264", "-f", "mov"],
          415, "UNSUPPORTED_MEDIA_FORMAT"),
     ],
-    ids=["h265", "60fps", "2k", "mov"],
+    ids=["h265", "60fps", "4k", "mov"],
 )
 def test_video_outside_the_contract(client, service, tmp_path: Path, args, status_code, code) -> None:
     clip = ffmpeg_clip(tmp_path / "clip.bin", *args)
