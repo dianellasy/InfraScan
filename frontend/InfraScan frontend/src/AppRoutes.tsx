@@ -1,13 +1,21 @@
+import { useState } from "react";
 import App from "./App.tsx";
 import { IssueDetailPage } from "./issues/IssueDetailPage.tsx";
 import { IssueMapPage } from "./issues/IssueMapPage.tsx";
 import { ReviewQueuePage } from "./issues/ReviewQueuePage.tsx";
+import { Login } from "./pages/Login.tsx";
 import { mapHref, useHashRoute } from "./routing.ts";
 import { TopBar } from "./TopBar.tsx";
 import "./App.css";
 
 export function AppRoutes() {
   const route = useHashRoute();
+  const [signedIn, setSignedIn] = useState(false);
+
+  if (!signedIn && route.name === "upload" && !route.jobId) {
+    return <Login onSignIn={() => setSignedIn(true)} />;
+  }
+
   // Keyed so a new submission, or returning to a job, starts from fresh state.
   if (route.name === "upload") return <App key={route.jobId ?? "new"} jobId={route.jobId} />;
   return (
