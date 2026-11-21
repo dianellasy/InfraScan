@@ -61,7 +61,7 @@ describe("upload form", () => {
     expect(screen.queryByLabelText("Capture date and time")).not.toBeInTheDocument();
     const note = screen.getByRole("note");
     expect(note).toHaveTextContent("embedded A119 Mini 2 GPS");
-    for (const setting of ["MP4", "H.264", "1920 × 1080", "30 fps", "GPS on", "10 minutes"]) {
+    for (const setting of ["MP4", "H.264", "2560 × 1440", "1920 × 1080", "30 fps", "GPS on", "10 minutes"]) {
       expect(note).toHaveTextContent(setting);
     }
 

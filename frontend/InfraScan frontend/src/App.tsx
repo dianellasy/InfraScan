@@ -294,7 +294,8 @@ function App({ jobId }: { jobId?: string }) {
                 <p className="video-note" role="note">
                   Capture time and location come from the clip's embedded A119 Mini 2 GPS
                   track, so no coordinates are needed. Required camera settings: MP4, H.264,
-                  1920 × 1080 (1080P), 30 fps, GPS on, loop recording of 10 minutes or less.
+                  2560 × 1440 (1440P) or 1920 × 1080 (1080P), 30 fps, GPS on, loop recording of
+                  10 minutes or less.
                 </p>
                 <div className="field-grid">
                   <label>
