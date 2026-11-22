@@ -42,6 +42,7 @@ from app.models import (
 from app.repositories import DetectionRecordRepository, InferenceJobRepository
 from app.services.inference_jobs import DatabaseInfraScanService, detection_to_dto
 from app.services.inference_processing import InferenceJobProcessor
+from auth_support import CITIZEN_A, citizen_a, developer
 from inference.celery.celery_app import PROCESS_INFERENCE_JOB_TASK
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "v0_mvp_multi_png_output.json"
@@ -141,12 +142,15 @@ class FakeCeleryApp:
         self.calls.append((name, args, kwargs))
 
 
-def build_client(service: DatabaseInfraScanService) -> TestClient:
+def build_client(
+    service: DatabaseInfraScanService, headers: dict[str, str] | None = None
+) -> TestClient:
+    """A client signed in as citizen A unless other `headers` are given."""
     app = FastAPI()
     app.state.infrascan_service = service
     register_exception_handlers(app)
     app.include_router(api_router, prefix="/api/v1")
-    return TestClient(app)
+    return TestClient(app, headers=citizen_a() if headers is None else headers)
 
 
 def build_service(
@@ -261,6 +265,7 @@ def test_submission_commits_media_and_job_before_enqueue(
     with session_factory() as session:
         job = session.get(InferenceJob, job_id)
         assert job.status == "pending"
+        assert job.user_id == CITIZEN_A
         assert job.captured_at == datetime(2026, 11, 10, 22, 30, tzinfo=UTC)
         assert job.latitude == Decimal("33.8823")
         assert job.longitude == Decimal("-117.8851")
@@ -292,7 +297,8 @@ def test_job_insert_failure_rolls_back_media_and_does_not_enqueue(
     status_code: int,
     code: str,
 ) -> None:
-    def fail(self, media, metadata):
+    def fail(self, media, metadata, user_id):
+        assert user_id == CITIZEN_A
         assert media.media_id is not None
         assert media.object_storage_key == f"input/{media.media_id}.jpg"
         raise error
@@ -768,7 +774,7 @@ def test_successful_zero_detection_job_lists_empty_page(
     ).process(job_id)
 
     with build_client(
-        build_service(session_factory, RecordingQueue(session_factory))
+        build_service(session_factory, RecordingQueue(session_factory)), developer()
     ) as client:
         response = client.get(f"/api/v1/jobs/{job_id}/detections")
         job = client.get(f"/api/v1/jobs/{job_id}").json()
@@ -828,7 +834,7 @@ def test_app_without_database_url_keeps_contract_503(monkeypatch: pytest.MonkeyP
     monkeypatch.delenv("DATABASE_URL", raising=False)
     import main
 
-    with TestClient(main.app) as client:
+    with TestClient(main.app, headers=citizen_a()) as client:
         response = submit(client)
 
     assert response.status_code == 503
@@ -840,7 +846,7 @@ def test_app_with_database_url_wires_database_service(monkeypatch: pytest.Monkey
     import main
 
     monkeypatch.setattr(main, "R2MediaStorageAdapter", InMemoryMediaStorage)
-    with TestClient(main.app) as client:
+    with TestClient(main.app, headers=citizen_a()) as client:
         assert isinstance(main.app.state.infrascan_service, DatabaseInfraScanService)
         not_implemented = client.get("/api/v1/roads")
 

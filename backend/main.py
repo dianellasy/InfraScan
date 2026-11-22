@@ -45,12 +45,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         engine.dispose()
 
 
+DEFAULT_CORS_ALLOWED_ORIGINS = "http://localhost:5173"
+
+
+def cors_allowed_origins(raw: str | None) -> list[str]:
+    """Exact origins from a comma-separated list; wildcards are rejected."""
+    value = DEFAULT_CORS_ALLOWED_ORIGINS if raw is None or not raw.strip() else raw
+    origins = [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
+    if "*" in origins:
+        raise RuntimeError("CORS_ALLOWED_ORIGINS must list exact origins, not '*'")
+    return origins
+
+
 app = FastAPI(title="InfraScan API", version="1.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=cors_allowed_origins(os.environ.get("CORS_ALLOWED_ORIGINS")),
     allow_methods=["GET", "POST", "PATCH"],
-    allow_headers=["*"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 app.add_middleware(UploadLimitMiddleware)
 register_exception_handlers(app)

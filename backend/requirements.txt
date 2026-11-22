@@ -10,3 +10,4 @@ alembic>=1.14,<2
 boto3>=1,<2
 python-dotenv>=1,<2
 uuid7>=0.1,<1
+PyJWT[crypto]>=2.10,<3

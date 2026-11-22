@@ -2,9 +2,17 @@ import type { ReactNode } from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { apiUrl } from "../api/endpoints.ts";
-import { collection, feature, jsonResponse, requestedUrls, stubFetch } from "../test/fixtures.ts";
+import {
+  authorizationFor,
+  collection,
+  feature,
+  imageResponse,
+  jsonResponse,
+  requestedUrls,
+  stubFetch,
+} from "../test/fixtures.ts";
 import { moveFakeMap, resetFakeMap } from "../test/reactLeafletMock.tsx";
+import { fakeSession, setStoredSession } from "../test/supabaseMock.ts";
 import { formatDateTime } from "./format.ts";
 import { IssueMapPage } from "./IssueMapPage.tsx";
 
@@ -94,7 +102,12 @@ describe("IssueMapPage", () => {
   });
 
   it("shows the selected Issue's details in the side panel", async () => {
-    stubFetch(() => jsonResponse(collection([repeatedPothole, conflict])));
+    setStoredSession(fakeSession({ accessToken: "token-a" }));
+    const fetchMock = stubFetch((url) =>
+      url.pathname.startsWith("/api/v1/evidence/")
+        ? imageResponse()
+        : jsonResponse(collection([repeatedPothole, conflict])),
+    );
     const user = userEvent.setup();
     renderPage();
 
@@ -112,10 +125,11 @@ describe("IssueMapPage", () => {
     expect(facts("First seen")).toHaveTextContent(formatDateTime(conflict.properties.first_seen_at));
     expect(facts("Last seen")).toHaveTextContent(formatDateTime(conflict.properties.last_seen_at));
     expect(facts("Review reason")).toHaveTextContent("Detections disagree on issue type");
-    expect(within(panel).getByRole("img")).toHaveAttribute(
-      "src",
-      apiUrl("/api/v1/evidence/evidence-conflict"),
-    );
+    // Protected evidence is fetched with the token, never loaded by <img src> directly.
+    expect((await within(panel).findByRole("img")).getAttribute("src")).toMatch(/^blob:/);
+    expect(authorizationFor(fetchMock, "/api/v1/evidence/evidence-conflict")).toEqual([
+      "Bearer token-a",
+    ]);
     expect(within(panel).getByRole("link", { name: "Open issue details" })).toHaveAttribute(
       "href",
       "#/issues/issue-conflict",

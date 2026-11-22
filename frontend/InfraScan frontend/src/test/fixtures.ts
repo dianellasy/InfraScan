@@ -95,9 +95,17 @@ export function detection(overrides: Partial<Detection> = {}): Detection {
   };
 }
 
+export function imageResponse(body = "jpeg-bytes"): Response {
+  // A string body: Node's Response cannot read jsdom's Blob.
+  return new Response(body, {
+    status: 200,
+    headers: { "Content-Type": "image/jpeg" },
+  });
+}
+
 export function stubFetch(handler: (url: URL) => Response | Promise<Response>) {
-  const fetchMock = vi.fn((input: RequestInfo | URL) =>
-    Promise.resolve(handler(new URL(String(input)))),
+  const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
+    (input) => Promise.resolve(handler(new URL(String(input)))),
   );
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
@@ -105,4 +113,14 @@ export function stubFetch(handler: (url: URL) => Response | Promise<Response>) {
 
 export function requestedUrls(fetchMock: ReturnType<typeof stubFetch>): URL[] {
   return fetchMock.mock.calls.map(([input]) => new URL(String(input)));
+}
+
+/** The Authorization header of each request to `pathname`. */
+export function authorizationFor(
+  fetchMock: ReturnType<typeof stubFetch>,
+  pathname: string,
+): Array<string | null> {
+  return fetchMock.mock.calls
+    .filter(([input]) => new URL(String(input)).pathname === pathname)
+    .map(([, init]) => new Headers(init?.headers).get("Authorization"));
 }

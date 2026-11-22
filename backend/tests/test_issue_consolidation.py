@@ -42,6 +42,7 @@ from app.services.issue_linking import (
     haversine_m,
     search_boxes,
 )
+from auth_support import developer
 from postgres_support import run_alembic
 from test_inference_workflow import (
     ANNOTATED_JPEG,
@@ -428,7 +429,8 @@ def test_unmapped_model_class_is_saved_without_an_issue(
         "unmapped model class 9" in record.getMessage() and str(job_id) in record.getMessage()
         for record in caplog.records
     )
-    with build_client(build_service(session_factory, RecordingQueue(session_factory))) as client:
+    service = build_service(session_factory, RecordingQueue(session_factory))
+    with build_client(service, developer()) as client:
         items = client.get(f"/api/v1/jobs/{job_id}/detections").json()["items"]
     assert [(i["issue_type"], i["predicted_issue_type_code"], i["issue_id"]) for i in items] == [
         (9, None, None), (3, "pothole", str(pothole)),

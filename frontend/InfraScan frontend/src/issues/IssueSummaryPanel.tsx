@@ -1,5 +1,5 @@
-import { apiUrl } from "../api/endpoints.ts";
 import { reviewReasonLabel, severityInfo, statusLabel } from "./constants.ts";
+import { EvidenceImage } from "./EvidenceImage.tsx";
 import { formatCoordinates, formatDateTime } from "./format.ts";
 import type { IssueFeature } from "./types.ts";
 
@@ -43,11 +43,9 @@ export function IssueSummaryPanel({ feature, onClose }: IssueSummaryPanelProps) 
       )}
 
       {issue.evidence_thumbnail_url ? (
-        <img
-          className="evidence-thumbnail"
-          src={apiUrl(issue.evidence_thumbnail_url)}
+        <EvidenceImage
+          path={issue.evidence_thumbnail_url}
           alt={`Representative evidence for this ${issue.issue_type_name.toLowerCase()}`}
-          loading="lazy"
         />
       ) : (
         <div className="evidence-placeholder">No evidence image</div>

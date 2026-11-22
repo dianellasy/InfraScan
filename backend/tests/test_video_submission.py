@@ -18,6 +18,7 @@ from a119_seed_support import ffmpeg_clip, requires_ffmpeg
 from app.api.upload_limit import UploadLimitMiddleware
 from app.api.v1.router import api_router
 from app.schemas import ResolvedVideoSubmission
+from auth_support import citizen_a
 from test_inference_submission import FakeSubmissionService, assert_error
 
 OFFSET = {"camera_utc_offset_minutes": -480}
@@ -39,7 +40,7 @@ def build_app(service, max_bytes: int | None = None) -> FastAPI:
 
 @pytest.fixture
 def client(service):
-    with TestClient(build_app(service)) as test_client:
+    with TestClient(build_app(service), headers=citizen_a()) as test_client:
         yield test_client
 
 
@@ -221,7 +222,7 @@ def test_missing_media_tools_return_503(client, monkeypatch) -> None:
 
 
 def test_request_limit_with_content_length(service) -> None:
-    with TestClient(build_app(service, max_bytes=10_000)) as client:
+    with TestClient(build_app(service, max_bytes=10_000), headers=citizen_a()) as client:
         response = submit(client, b"\0\0\0\x18ftypisom" + bytes(20_000))
     assert_error(response, 413, "FILE_TOO_LARGE", "file")
     assert "1,000,000,000" in response.json()["error"]["message"]
@@ -248,7 +249,10 @@ def test_request_limit_without_content_length(service) -> None:
             return await client.post(
                 "/api/v1/inference/jobs",
                 content=body(),
-                headers={"content-type": f"multipart/form-data; boundary={boundary}"},
+                headers={
+                    "content-type": f"multipart/form-data; boundary={boundary}",
+                    **citizen_a(),
+                },
             )
 
     response = asyncio.run(run())
@@ -284,5 +288,5 @@ def test_openapi_documents_both_contracts_and_every_error_code(service) -> None:
         "INVALID_VIDEO_DURATION",
     ):
         assert code in text, code
-    for status_code in ("202", "413", "415", "422", "503"):
+    for status_code in ("202", "401", "413", "415", "422", "503"):
         assert status_code in operation["responses"]

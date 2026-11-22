@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
+from app.api.auth import CurrentUser, PrivilegedUser
 from app.api.dependencies import get_service
 from app.api.errors import error_response as _error_response
 from app.api.video_validation import (
@@ -594,13 +595,17 @@ _ERROR_CODES = {
         "Validates and accepts one JPEG image or one VIOFO A119 Mini 2 MP4 without "
         "waiting for model inference. Media is streamed to object storage; an MP4 "
         "is processed as one job that samples at most 60 frames. "
-        "Authentication is deferred; the future production contract will use "
-        "an Authorization: Bearer <token> header and derive the user ID on the "
-        "backend. Track the returned application job ID with GET "
+        "Requires an Authorization: Bearer <Supabase access token> header; the "
+        "job is owned by the token's user ID, which is never taken from the "
+        "request body. Track the returned application job ID with GET "
         "/api/v1/jobs/{job_id}."
     ),
     responses={
         400: {"model": APIErrorResponse, "description": _ERROR_CODES[400]},
+        401: {
+            "model": APIErrorResponse,
+            "description": "AUTHENTICATION_REQUIRED or INVALID_TOKEN",
+        },
         413: {"model": APIErrorResponse, "description": _ERROR_CODES[413]},
         415: {"model": APIErrorResponse, "description": _ERROR_CODES[415]},
         422: {"model": APIErrorResponse, "description": _ERROR_CODES[422]},
@@ -608,7 +613,8 @@ _ERROR_CODES = {
         503: {
             "model": APIErrorResponse,
             "description": (
-                "SERVICE_UNAVAILABLE (not configured) or "
+                "SERVICE_UNAVAILABLE (not configured), "
+                "AUTHENTICATION_UNAVAILABLE (token verification unavailable), or "
                 "SUBMISSION_DEPENDENCY_UNAVAILABLE (database, object storage, "
                 "queue, or video tools unavailable)"
             ),
@@ -618,6 +624,7 @@ _ERROR_CODES = {
 )
 async def submit_inference(
     request: Request,
+    user: CurrentUser,
     service: InfraScanService | None = Depends(_get_submission_service),
 ) -> InferenceJobAccepted | JSONResponse:
     try:
@@ -640,7 +647,7 @@ async def submit_inference(
         )
 
     try:
-        return await service.submit_inference(upload, metadata)
+        return await service.submit_inference(upload, metadata, user.id)
     except SubmissionDependencyUnavailableError:
         return _error_response(
             status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -660,8 +667,9 @@ async def submit_inference(
     "/smoke-test",
     status_code=status.HTTP_200_OK,
     summary="Smoke test the RabbitMQ + Celery + YOLO inference pipeline",
+    description="Developer and municipal administrator only: runs real inference.",
 )
-async def smoke_test_inference() -> dict:
+async def smoke_test_inference(_user: PrivilegedUser) -> dict:
     if SMOKE_IMAGE_PATH.exists():
         image_bytes = SMOKE_IMAGE_PATH.read_bytes()
         filename = SMOKE_IMAGE_PATH.name

@@ -394,6 +394,12 @@ class DamageDistributionDTO(BaseModel):
     percentage: float = Field(ge=0, le=100)
 
 
+class CurrentUserDTO(BaseModel):
+    id: UUID = Field(description="Supabase Auth user ID (the access token's `sub`).")
+    role: str
+    municipality_id: str | None = None
+
+
 class APIError(BaseModel):
     code: str
     message: str

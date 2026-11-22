@@ -2,19 +2,21 @@ import type { ReactNode } from "react";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { apiUrl } from "./api/endpoints.ts";
 import { AppRoutes } from "./AppRoutes.tsx";
 import { focusBounds, parseRoute } from "./routing.ts";
 import {
+  authorizationFor,
   collection,
   detection,
   feature,
+  imageResponse,
   issue,
   jsonResponse,
   requestedUrls,
   stubFetch,
 } from "./test/fixtures.ts";
 import { resetFakeMap } from "./test/reactLeafletMock.tsx";
+import { fakeSession, setStoredSession } from "./test/supabaseMock.ts";
 
 vi.mock("react-leaflet", () => import("./test/reactLeafletMock.tsx"));
 vi.mock("react-leaflet-cluster", () => ({
@@ -71,11 +73,14 @@ describe("from a completed job to the issue map and detail", () => {
           return jsonResponse(uploaded);
         case "/api/v1/issues/issue-uploaded/detections":
           return jsonResponse({ items: [supporting], total: 1, page: 1, page_size: 100 });
+        case "/api/v1/evidence/evidence-uploaded":
+          return imageResponse();
         default:
           throw new Error(`Unexpected request ${url}`);
       }
     });
     const user = userEvent.setup();
+    setStoredSession(fakeSession({ accessToken: "token-a" }));
     window.location.hash = "#/jobs/job-1";
     render(<AppRoutes />);
 
@@ -108,11 +113,13 @@ describe("from a completed job to the issue map and detail", () => {
     expect(marker).toHaveAttribute("data-lat", String(ISSUE_POINT.latitude));
     expect(marker).toHaveAttribute("data-lng", String(ISSUE_POINT.longitude));
 
-    // The job's issue is preselected in the side panel.
+    // The job's issue is preselected in the side panel; its evidence is fetched
+    // with the bearer token and shown from an object URL.
     const panel = screen.getByRole("complementary", { name: "Selected issue" });
-    expect(within(panel).getByRole("img")).toHaveAttribute(
-      "src", apiUrl("/api/v1/evidence/evidence-uploaded"),
-    );
+    expect((await within(panel).findByRole("img")).getAttribute("src")).toMatch(/^blob:/);
+    expect(authorizationFor(fetchMock, "/api/v1/evidence/evidence-uploaded")).toEqual([
+      "Bearer token-a",
+    ]);
 
     // An open map picks up Issues created afterwards via Refresh.
     mapFeatures = [uploadedFeature, laterFeature];
@@ -123,12 +130,17 @@ describe("from a completed job to the issue map and detail", () => {
     const rows = (await screen.findAllByRole("row")).slice(1);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toHaveTextContent("Pothole (class 3)");
-    expect(within(rows[0]).getByRole("link", { name: "View" })).toHaveAttribute(
-      "href", apiUrl("/api/v1/evidence/evidence-uploaded"),
+    expect((await screen.findByRole("img")).getAttribute("src")).toMatch(/^blob:/);
+    await user.click(within(rows[0]).getByRole("button", { name: "View" }));
+    const evidence = await screen.findByRole("img", { name: /Evidence for the pothole detection/ });
+    expect(evidence.getAttribute("src")).toMatch(/^blob:/);
+    expect(within(rows[0]).getByRole("button", { name: "Hide" })).toHaveAttribute(
+      "aria-expanded", "true",
     );
-    expect(screen.getByRole("img")).toHaveAttribute(
-      "src", apiUrl("/api/v1/evidence/evidence-uploaded"),
-    );
+    expect(authorizationFor(fetchMock, "/api/v1/evidence/evidence-uploaded").every(
+      (header) => header === "Bearer token-a",
+    )).toBe(true);
+    expect(screen.queryByRole("link", { name: "View" })).not.toBeInTheDocument();
 
     // Back on the job link, the results are restored from the API.
     await act(async () => {

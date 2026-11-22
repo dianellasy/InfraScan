@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import JSONResponse
 
+from app.api.auth import CurrentJobAccess
 from app.api.dependencies import get_service
 from app.api.errors import error_response
 from app.schemas import APIErrorResponse, DetectionDTO, InferenceJobDTO, Page
@@ -13,7 +14,10 @@ from app.services.contracts import InfraScanService, JobNotFoundError
 router = APIRouter(prefix="/jobs", tags=["inference jobs"])
 
 _JOB_NOT_FOUND_RESPONSES = {
-    404: {"model": APIErrorResponse, "description": "Unknown inference job"},
+    404: {
+        "model": APIErrorResponse,
+        "description": "Unknown inference job, or one the caller may not access",
+    },
 }
 
 
@@ -28,6 +32,7 @@ def _job_not_found() -> JSONResponse:
 
 @router.get("", response_model=Page[InferenceJobDTO])
 async def list_jobs(
+    access: CurrentJobAccess,
     service: Annotated[InfraScanService, Depends(get_service)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 50,
@@ -36,7 +41,7 @@ async def list_jobs(
     submitted_before: datetime | None = None,
 ) -> Page[InferenceJobDTO]:
     return await service.list_jobs(
-        page, page_size, status_filter, submitted_after, submitted_before
+        page, page_size, status_filter, submitted_after, submitted_before, access
     )
 
 
@@ -47,10 +52,11 @@ async def list_jobs(
 )
 async def get_job(
     job_id: UUID,
+    access: CurrentJobAccess,
     service: Annotated[InfraScanService, Depends(get_service)],
 ) -> InferenceJobDTO | JSONResponse:
     try:
-        return await service.get_job(job_id)
+        return await service.get_job(job_id, access)
     except JobNotFoundError:
         return _job_not_found()
 
@@ -62,11 +68,12 @@ async def get_job(
 )
 async def list_job_detections(
     job_id: UUID,
+    access: CurrentJobAccess,
     service: Annotated[InfraScanService, Depends(get_service)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> Page[DetectionDTO] | JSONResponse:
     try:
-        return await service.list_job_detections(job_id, page, page_size)
+        return await service.list_job_detections(job_id, page, page_size, access)
     except JobNotFoundError:
         return _job_not_found()

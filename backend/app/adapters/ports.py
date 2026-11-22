@@ -54,7 +54,7 @@ class MediaStorageAdapter(Protocol):
 
 class InferenceJobRepositoryAdapter(Protocol):
     def create_pending(
-        self, media: StoredMedia, metadata: InferenceSubmissionMetadata
+        self, media: StoredMedia, metadata: InferenceSubmissionMetadata, user_id: UUID
     ) -> InferenceJob: ...
 
     def get(self, job_id: UUID) -> InferenceJob | None: ...

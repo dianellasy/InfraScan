@@ -26,6 +26,7 @@ from app.models import (
 )
 from app.seeds import stanton_anaheim
 from app.services.inference_jobs import DatabaseInfraScanService
+from auth_support import developer
 
 SEEN_AT = datetime(2026, 11, 1, 18, 0, tzinfo=UTC)
 WORLD = {
@@ -47,7 +48,7 @@ def client(session_factory: sessionmaker[Session]) -> TestClient:
     app.state.infrascan_service = DatabaseInfraScanService(session_factory, NoopQueue())
     register_exception_handlers(app)
     app.include_router(api_router, prefix="/api/v1")
-    return TestClient(app)
+    return TestClient(app, headers=developer())
 
 
 def add_issue(

@@ -4,6 +4,7 @@ from uuid import UUID
 
 from fastapi import UploadFile
 
+from app.authorization import JobAccess
 from app.schemas import (
     AnalyticsOverviewDTO,
     BoundingBox,
@@ -32,7 +33,7 @@ class SubmissionDependencyUnavailableError(Exception):
 
 
 class JobNotFoundError(LookupError):
-    """No inference job exists for the requested application job ID."""
+    """No inference job the caller may access exists for the requested job ID."""
 
 
 class IssueNotFoundError(LookupError):
@@ -40,24 +41,33 @@ class IssueNotFoundError(LookupError):
 
 
 class EvidenceNotFoundError(LookupError):
-    """No evidence image exists for the requested media ID."""
+    """No evidence image the caller may access exists for the requested media ID."""
 
 
 class InfraScanService(Protocol):
+    """Application service behind the HTTP API.
+
+    Methods taking a `JobAccess` must hide jobs, detections, and evidence it does
+    not cover exactly as if they did not exist (callers answer 404), never with
+    a distinct "forbidden" outcome.
+    """
+
     async def submit_inference(
-        self, file: UploadFile, metadata: InferenceSubmissionMetadata
+        self, file: UploadFile, metadata: InferenceSubmissionMetadata, user_id: UUID
     ) -> InferenceJobAccepted:
         """Accept one image without waiting for inference.
 
         Implementations must store the media, create and commit the application
-        job with its metadata and media reference, then enqueue work using that
-        job ID. The job must be committed before a worker can consume it.
-        Dispatch failures must be handled explicitly by the implementation.
+        job with its metadata, media reference, and owner `user_id` (the
+        verified Supabase user UUID, never client input), then enqueue work
+        using that job ID. The job must be committed before a worker can
+        consume it. Dispatch failures must be handled explicitly by the
+        implementation.
         """
         ...
 
     async def list_issue_map(
-        self, bbox: BoundingBox, filters: IssueFilters, limit: int
+        self, bbox: BoundingBox, filters: IssueFilters, limit: int, access: JobAccess
     ) -> IssueFeatureCollection:
         """Located Issues in `bbox` as GeoJSON, one Feature per Issue.
 
@@ -72,22 +82,25 @@ class InfraScanService(Protocol):
         bbox: BoundingBox | None,
         page: int,
         page_size: int,
+        access: JobAccess,
     ) -> Page[IssueDTO]: ...
 
-    async def get_issue(self, issue_id: UUID) -> IssueDTO: ...
+    async def get_issue(self, issue_id: UUID, access: JobAccess) -> IssueDTO: ...
 
     async def list_issue_detections(
-        self, issue_id: UUID, page: int, page_size: int
+        self, issue_id: UUID, page: int, page_size: int, access: JobAccess
     ) -> Page[DetectionDTO]: ...
 
-    async def get_evidence_image(self, media_id: UUID) -> EvidenceImage: ...
+    async def get_evidence_image(
+        self, media_id: UUID, access: JobAccess
+    ) -> EvidenceImage: ...
 
     async def create_issue(self, issue: IssueCreate) -> IssueDTO: ...
 
     async def update_issue(self, issue_id: UUID, update: IssueUpdate) -> IssueDTO: ...
 
     async def list_review_queue(
-        self, page: int, page_size: int
+        self, page: int, page_size: int, access: JobAccess
     ) -> Page[IssueDTO]: ...
 
     async def list_jobs(
@@ -97,12 +110,13 @@ class InfraScanService(Protocol):
         status: str | None,
         submitted_after: datetime | None,
         submitted_before: datetime | None,
+        access: JobAccess,
     ) -> Page[InferenceJobDTO]: ...
 
-    async def get_job(self, job_id: UUID) -> InferenceJobDTO: ...
+    async def get_job(self, job_id: UUID, access: JobAccess) -> InferenceJobDTO: ...
 
     async def list_job_detections(
-        self, job_id: UUID, page: int, page_size: int
+        self, job_id: UUID, page: int, page_size: int, access: JobAccess
     ) -> Page[DetectionDTO]: ...
 
     async def list_roads(

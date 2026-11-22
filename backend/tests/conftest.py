@@ -7,8 +7,10 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.api import auth
 from app.db import create_db_engine, create_session_factory
 from a119_seed_support import generate_seed
+from auth_support import TEST_SUPABASE_URL, jwks_document
 from postgres_support import disposable_postgres, run_alembic
 
 # `issue_types` is reference data inserted by its migration, so it is not truncated.
@@ -19,6 +21,25 @@ APPLICATION_TABLES = (
     "input_media",
     "issues",
 )
+
+
+@pytest.fixture(autouse=True)
+def supabase_test_jwks(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[str]]:
+    """Verify tokens against the test key; no test ever contacts Supabase.
+
+    Yields the list of JWKS URLs fetched, for tests that assert caching.
+    """
+    fetched: list[str] = []
+
+    def fetch(url: str) -> dict:
+        fetched.append(url)
+        return jwks_document()
+
+    monkeypatch.setenv("SUPABASE_URL", TEST_SUPABASE_URL)
+    monkeypatch.setattr(auth, "fetch_jwks", fetch)
+    auth.reset_token_verifiers()
+    yield fetched
+    auth.reset_token_verifiers()
 
 
 @pytest.fixture

@@ -1,20 +1,14 @@
-import { useState } from "react";
 import App from "./App.tsx";
+import { AuthGate } from "./auth/AuthGate.tsx";
 import { IssueDetailPage } from "./issues/IssueDetailPage.tsx";
 import { IssueMapPage } from "./issues/IssueMapPage.tsx";
 import { ReviewQueuePage } from "./issues/ReviewQueuePage.tsx";
-import { Login } from "./pages/Login.tsx";
 import { mapHref, useHashRoute } from "./routing.ts";
 import { TopBar } from "./TopBar.tsx";
 import "./App.css";
 
-export function AppRoutes() {
+function SignedInRoutes() {
   const route = useHashRoute();
-  const [signedIn, setSignedIn] = useState(false);
-
-  if (!signedIn && route.name === "upload" && !route.jobId) {
-    return <Login onSignIn={() => setSignedIn(true)} />;
-  }
 
   // Keyed so a new submission, or returning to a job, starts from fresh state.
   if (route.name === "upload") return <App key={route.jobId ?? "new"} jobId={route.jobId} />;
@@ -32,5 +26,14 @@ export function AppRoutes() {
       {route.name === "issue" && <IssueDetailPage key={route.issueId} issueId={route.issueId} />}
       <footer>InfraScan · Road damage detection</footer>
     </main>
+  );
+}
+
+/** Every route, including job and Issue deep links, requires a signed-in user. */
+export function AppRoutes() {
+  return (
+    <AuthGate>
+      <SignedInRoutes />
+    </AuthGate>
   );
 }

@@ -18,6 +18,7 @@ pytest.importorskip("ultralytics")
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from auth_support import citizen_a  # noqa: E402
 from PIL import Image  # noqa: E402
 from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
 
@@ -148,7 +149,7 @@ def test_http_to_celery_worker_to_database_with_real_model(
 
     try:
         with start_worker(celery_app, pool="solo", perform_ping_check=False, shutdown_timeout=30):
-            with TestClient(app) as client:
+            with TestClient(app, headers=citizen_a()) as client:
                 response = client.post(
                     "/api/v1/inference/jobs",
                     files=[

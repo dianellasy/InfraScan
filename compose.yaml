@@ -35,6 +35,8 @@ services:
       dockerfile: Dockerfile
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-infrascan}:${POSTGRES_PASSWORD:-infrascan_dev}@db:5432/${POSTGRES_DB:-infrascan}
+      SUPABASE_URL: ${SUPABASE_URL:?Set SUPABASE_URL}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
       CELERY_BROKER_URL: amqp://${RABBITMQ_USER:-infrascan}:${RABBITMQ_PASSWORD:-infrascan_dev}@rabbitmq:5672//
       CELERY_RESULT_BACKEND: db+postgresql+psycopg://${POSTGRES_USER:-infrascan}:${POSTGRES_PASSWORD:-infrascan_dev}@db:5432/${POSTGRES_DB:-infrascan}
       R2_BUCKET: ${R2_BUCKET:?Set R2_BUCKET}

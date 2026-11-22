@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
-import { apiUrl } from "../api/endpoints.ts";
+import { Fragment, useEffect, useState } from "react";
 import { focusBounds, mapHref } from "../routing.ts";
 import { fetchIssue, fetchIssueDetections } from "./api.ts";
 import { issueTypeInfo, reviewReasonLabel, severityInfo, statusLabel } from "./constants.ts";
+import { EvidenceImage } from "./EvidenceImage.tsx";
 import { formatCoordinates, formatDateTime } from "./format.ts";
 import { IssueSymbol } from "./IssueSymbol.tsx";
 import type { Detection, Issue, Page } from "./types.ts";
@@ -68,6 +68,7 @@ export function IssueDetailPage({ issueId }: { issueId: string }) {
 }
 
 function IssueDetail({ issue, detections }: { issue: Issue; detections: Page<Detection> }) {
+  const [openEvidence, setOpenEvidence] = useState<string | null>(null);
   const typeCounts = predictedTypeCounts(detections.items);
   const hasConflict = typeCounts.length > 1;
   return (
@@ -157,9 +158,8 @@ function IssueDetail({ issue, detections }: { issue: Issue; detections: Page<Det
         </section>
         <section className="panel issue-detail-evidence">
           {issue.evidence_thumbnail_url ? (
-            <img
-              className="evidence-thumbnail"
-              src={apiUrl(issue.evidence_thumbnail_url)}
+            <EvidenceImage
+              path={issue.evidence_thumbnail_url}
               alt={`Representative evidence for this ${issue.issue_type_name.toLowerCase()}`}
             />
           ) : (
@@ -178,6 +178,12 @@ function IssueDetail({ issue, detections }: { issue: Issue; detections: Page<Det
             {detections.items.length} of {detections.total} detections
           </span>
         </div>
+        {detections.total < issue.detection_count && (
+          <p className="field-hint">
+            Showing detections from your submissions only. Other people's detections and
+            evidence for this issue are private.
+          </p>
+        )}
         <div className="table-scroll">
           <table>
             <thead>
@@ -196,51 +202,69 @@ function IssueDetail({ issue, detections }: { issue: Issue; detections: Page<Det
                 const differs =
                   detection.predicted_issue_type_code !== null &&
                   detection.predicted_issue_type_code !== issue.issue_type_code;
+                const evidenceMedia = detection.evidence_media;
+                const evidenceShown =
+                  evidenceMedia !== null && openEvidence === detection.detection_id;
                 return (
-                  <tr key={detection.detection_id} className={differs ? "type-differs" : undefined}>
-                    <td>
-                      {detection.observed_at ? formatDateTime(detection.observed_at) : "Unknown"}
-                      {detection.frame_timestamp != null && (
-                        <span className="class-id"> (video {detection.frame_timestamp.toFixed(2)} s)</span>
-                      )}
-                    </td>
-                    <td>
-                      <strong>{detection.classification}</strong>
-                      {detection.issue_type != null && (
-                        <span className="class-id"> (class {detection.issue_type})</span>
-                      )}
-                    </td>
-                    <td>
-                      {detection.predicted_issue_type_code
-                        ? issueTypeInfo(detection.predicted_issue_type_code).label
-                        : "Unmapped"}
-                      {differs && <span className="differs-badge">Differs from issue</span>}
-                    </td>
-                    <td>{(detection.confidence * 100).toFixed(1)}%</td>
-                    <td>
-                      <span className={`severity ${detection.severity}`}>
-                        {severityInfo(detection.severity).label}
-                      </span>
-                    </td>
-                    <td>
-                      {detection.latitude != null && detection.longitude != null
-                        ? formatCoordinates(detection.latitude, detection.longitude)
-                        : "—"}
-                    </td>
-                    <td>
-                      {detection.evidence_media ? (
-                        <a
-                          href={apiUrl(`/api/v1/evidence/${encodeURIComponent(detection.evidence_media)}`)}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          View
-                        </a>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                  </tr>
+                  <Fragment key={detection.detection_id}>
+                    <tr className={differs ? "type-differs" : undefined}>
+                      <td>
+                        {detection.observed_at ? formatDateTime(detection.observed_at) : "Unknown"}
+                        {detection.frame_timestamp != null && (
+                          <span className="class-id"> (video {detection.frame_timestamp.toFixed(2)} s)</span>
+                        )}
+                      </td>
+                      <td>
+                        <strong>{detection.classification}</strong>
+                        {detection.issue_type != null && (
+                          <span className="class-id"> (class {detection.issue_type})</span>
+                        )}
+                      </td>
+                      <td>
+                        {detection.predicted_issue_type_code
+                          ? issueTypeInfo(detection.predicted_issue_type_code).label
+                          : "Unmapped"}
+                        {differs && <span className="differs-badge">Differs from issue</span>}
+                      </td>
+                      <td>{(detection.confidence * 100).toFixed(1)}%</td>
+                      <td>
+                        <span className={`severity ${detection.severity}`}>
+                          {severityInfo(detection.severity).label}
+                        </span>
+                      </td>
+                      <td>
+                        {detection.latitude != null && detection.longitude != null
+                          ? formatCoordinates(detection.latitude, detection.longitude)
+                          : "—"}
+                      </td>
+                      <td>
+                        {evidenceMedia ? (
+                          <button
+                            type="button"
+                            className="link-button-inline"
+                            aria-expanded={evidenceShown}
+                            onClick={() =>
+                              setOpenEvidence(evidenceShown ? null : detection.detection_id)
+                            }
+                          >
+                            {evidenceShown ? "Hide" : "View"}
+                          </button>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                    </tr>
+                    {evidenceShown && evidenceMedia && (
+                      <tr className="evidence-row">
+                        <td colSpan={7}>
+                          <EvidenceImage
+                            path={`/api/v1/evidence/${encodeURIComponent(evidenceMedia)}`}
+                            alt={`Evidence for the ${detection.classification.toLowerCase()} detection`}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 );
               })}
             </tbody>

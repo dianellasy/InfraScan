@@ -24,7 +24,7 @@ from postgres_support import run_alembic as _run_alembic
 
 REPO_ROOT = BACKEND_DIR.parent
 ALEMBIC_INI = BACKEND_DIR / "alembic.ini"
-HEAD_REVISION = "d4f6a8b03152"
+HEAD_REVISION = "e5a7c9d14263"
 
 
 def _load_alembic_runtime():
@@ -107,9 +107,16 @@ def test_inference_job_model_columns_defaults_and_constraints() -> None:
     assert table.c.job_id.nullable is False
     assert table.c.job_id.default is not None
 
-    # Authentication is not implemented and no users table exists yet.
+    # A Supabase Auth user UUID: Auth is a separate database, so no foreign key.
+    # Nullable only for historical jobs; owner-scoped reads use the index.
     assert table.c.user_id.nullable is True
     assert len(table.c.user_id.foreign_keys) == 0
+    owner_indexes = [
+        idx for idx in table.indexes if [col.name for col in idx.columns] == ["user_id"]
+    ]
+    assert [(idx.name, idx.unique) for idx in owner_indexes] == [
+        ("ix_inference_jobs_user_id", False)
+    ]
 
     # Required FK to input_media with ON DELETE RESTRICT, non-unique index.
     assert table.c.input_media_id.nullable is False
@@ -264,6 +271,8 @@ def test_alembic_renders_upgrade_and_downgrade_sql_offline() -> None:
     assert "ck_input_media_data_or_object_storage_key" in sql
     assert "ck_evidence_media_data_or_object_storage_key" in sql
     assert "data IS NOT NULL OR object_storage_key IS NOT NULL" in sql
+    assert "CREATE INDEX ix_inference_jobs_user_id ON inference_jobs (user_id)" in sql
+    assert "auth.users" not in sql
 
     downgrade = _run_alembic(
         "downgrade",

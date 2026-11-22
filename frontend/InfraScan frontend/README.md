@@ -1,27 +1,44 @@
 # InfraScan frontend
 
-The React app provides a simple image submission and inference workflow:
+The React app provides authenticated road-image and video submission, job
+polling, and Issue map / detail / review flows.
 
-- Select and submit one JPEG road image (`.jpg` or `.jpeg`) with required capture
-  date/time, latitude, and longitude.
-- Enforce the 5,000,000-byte upload limit before submission. The backend validates
-  image content and the dimension limits (longest side 4032 px, shortest side
-  3024 px).
-- Poll the accepted inference job until it completes or fails.
-- Review the job's detection classification, severity, confidence, location, and timestamp.
+## Authentication
+
+Sign-in uses **Supabase Auth** (email/password) through `@supabase/supabase-js`.
+Configure only:
+
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_PUBLISHABLE_KEY`
+
+Never put a Supabase secret or service-role key in Vite variables. The shared
+API helper (`src/api/request.ts`) attaches `Authorization: Bearer <access
+token>` to InfraScan API calls. Evidence images cannot use a plain `<img src>`
+(browsers omit the header), so `EvidenceImage` fetches with the token and shows
+a short-lived object URL.
+
+`AuthGate` restores the session on reload, shows Esther's login page when signed
+out, and returns the user to sign-in on HTTP 401. Sign-out lives in the top bar.
+
+Roles are displayed from `app_metadata` for UX only; the backend enforces access.
 
 ## Run locally
 
 From this directory:
 
 ```bash
+cp .env.example .env   # fill VITE_SUPABASE_* and optional VITE_API_BASE_URL
 npm install
 npm run dev
 ```
 
-By default, the app calls the API at `http://127.0.0.1:8000`. Set
-`VITE_API_BASE_URL` in a `.env` file to use a different API origin. The API
-allows the Vite development origin `http://localhost:5173`; its application
-service must be configured for inference and job requests to succeed.
+By default the app calls `http://127.0.0.1:8000`. The API must allow the Vite
+origin (`CORS_ALLOWED_ORIGINS`, default `http://localhost:5173`) and have
+`SUPABASE_URL` set so tokens verify.
 
-Run `npm run build` and `npm run lint` to validate the frontend.
+```bash
+npm test
+npm run typecheck
+npm run build
+npm run lint
+```

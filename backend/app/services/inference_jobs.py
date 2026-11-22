@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from app.adapters.ports import InferenceQueueAdapter, MediaStorageAdapter
+from app.authorization import JobAccess
 from app.models import InferenceJob
 from app.repositories import (
     DetectionRecordRepository,
@@ -94,9 +95,9 @@ class DatabaseInfraScanService:
         self._issues = IssueQueries(session_factory, media_storage)
 
     async def submit_inference(
-        self, file: UploadFile, metadata: InferenceSubmissionMetadata
+        self, file: UploadFile, metadata: InferenceSubmissionMetadata, user_id: UUID
     ) -> InferenceJobAccepted:
-        """Upload to object storage, commit the job, then publish its ID."""
+        """Upload to object storage, commit the job owned by `user_id`, then publish its ID."""
         if self._media_storage is None:
             logger.error("Object storage is not configured; rejecting submission")
             raise SubmissionDependencyUnavailableError
@@ -114,7 +115,13 @@ class DatabaseInfraScanService:
             data = await file.read()
             await run_in_threadpool(self._upload, key, content_type, None, data)
         accepted = await run_in_threadpool(
-            self._create_pending_job, media_id, key, content_type, file.filename, metadata
+            self._create_pending_job,
+            media_id,
+            key,
+            content_type,
+            file.filename,
+            metadata,
+            user_id,
         )
         await run_in_threadpool(self._publish, accepted.job_id)
         return accepted
@@ -146,6 +153,7 @@ class DatabaseInfraScanService:
         content_type: str,
         filename: str | None,
         metadata: InferenceSubmissionMetadata,
+        user_id: UUID,
     ) -> InferenceJobAccepted:
         try:
             with self._session_factory() as session, session.begin():
@@ -156,7 +164,9 @@ class DatabaseInfraScanService:
                     media_id=media_id,
                     object_storage_key=key,
                 )
-                job = InferenceJobRepository(session).create_pending(media, metadata)
+                job = InferenceJobRepository(session).create_pending(
+                    media, metadata, user_id
+                )
                 accepted = InferenceJobAccepted(
                     job_id=job.job_id,
                     status="pending",
@@ -188,32 +198,32 @@ class DatabaseInfraScanService:
                 "Could not mark inference job %s failed after enqueue error", job_id
             )
 
-    async def get_job(self, job_id: UUID) -> InferenceJobDTO:
-        job = await run_in_threadpool(self._load_job, job_id)
+    async def get_job(self, job_id: UUID, access: JobAccess) -> InferenceJobDTO:
+        job = await run_in_threadpool(self._load_job, job_id, access)
         if job is None:
             raise JobNotFoundError(job_id)
         return job
 
-    def _load_job(self, job_id: UUID) -> InferenceJobDTO | None:
+    def _load_job(self, job_id: UUID, access: JobAccess) -> InferenceJobDTO | None:
         with self._session_factory() as session:
-            job = InferenceJobRepository(session).get(job_id)
+            job = InferenceJobRepository(session).get_accessible(job_id, access)
             return job_to_dto(job) if job is not None else None
 
     async def list_job_detections(
-        self, job_id: UUID, page: int, page_size: int
+        self, job_id: UUID, page: int, page_size: int, access: JobAccess
     ) -> Page[DetectionDTO]:
         detections = await run_in_threadpool(
-            self._load_job_detections, job_id, page, page_size
+            self._load_job_detections, job_id, page, page_size, access
         )
         if detections is None:
             raise JobNotFoundError(job_id)
         return detections
 
     def _load_job_detections(
-        self, job_id: UUID, page: int, page_size: int
+        self, job_id: UUID, page: int, page_size: int, access: JobAccess
     ) -> Page[DetectionDTO] | None:
         with self._session_factory() as session:
-            if not InferenceJobRepository(session).exists(job_id):
+            if not InferenceJobRepository(session).exists(job_id, access):
                 return None
             records, total = DetectionRecordRepository(session).list_for_job(
                 job_id, offset=(page - 1) * page_size, limit=page_size
@@ -226,9 +236,11 @@ class DatabaseInfraScanService:
             )
 
     async def list_issue_map(
-        self, bbox: BoundingBox, filters: IssueFilters, limit: int
+        self, bbox: BoundingBox, filters: IssueFilters, limit: int, access: JobAccess
     ) -> IssueFeatureCollection:
-        return await run_in_threadpool(self._issues.map_features, bbox, filters, limit)
+        return await run_in_threadpool(
+            self._issues.map_features, bbox, filters, limit, access
+        )
 
     async def list_issues(
         self,
@@ -236,32 +248,35 @@ class DatabaseInfraScanService:
         bbox: BoundingBox | None,
         page: int,
         page_size: int,
+        access: JobAccess,
     ) -> Page[IssueDTO]:
         return await run_in_threadpool(
-            self._issues.list_issues, filters, bbox, page, page_size
+            self._issues.list_issues, filters, bbox, page, page_size, access
         )
 
-    async def list_review_queue(self, page: int, page_size: int) -> Page[IssueDTO]:
-        return await run_in_threadpool(self._issues.review_queue, page, page_size)
+    async def list_review_queue(
+        self, page: int, page_size: int, access: JobAccess
+    ) -> Page[IssueDTO]:
+        return await run_in_threadpool(self._issues.review_queue, page, page_size, access)
 
-    async def get_issue(self, issue_id: UUID) -> IssueDTO:
-        issue = await run_in_threadpool(self._issues.get, issue_id)
+    async def get_issue(self, issue_id: UUID, access: JobAccess) -> IssueDTO:
+        issue = await run_in_threadpool(self._issues.get, issue_id, access)
         if issue is None:
             raise IssueNotFoundError(issue_id)
         return issue
 
     async def list_issue_detections(
-        self, issue_id: UUID, page: int, page_size: int
+        self, issue_id: UUID, page: int, page_size: int, access: JobAccess
     ) -> Page[DetectionDTO]:
         detections = await run_in_threadpool(
-            self._issues.detections, issue_id, page, page_size
+            self._issues.detections, issue_id, page, page_size, access
         )
         if detections is None:
             raise IssueNotFoundError(issue_id)
         return detections
 
-    async def get_evidence_image(self, media_id: UUID) -> EvidenceImage:
-        image = await run_in_threadpool(self._issues.evidence, media_id)
+    async def get_evidence_image(self, media_id: UUID, access: JobAccess) -> EvidenceImage:
+        image = await run_in_threadpool(self._issues.evidence, media_id, access)
         if image is None:
             raise EvidenceNotFoundError(media_id)
         return image

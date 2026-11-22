@@ -35,26 +35,27 @@ Still need to consider
 The FastAPI contract is versioned under `/api/v1` and declares the API routes
 and Pydantic DTOs described in the architecture design:
 
-| Method | Endpoint |
-| --- | --- |
-| `POST` | `/api/v1/inference/smoke_test` |
-| `POST` | `/api/v1/inference/jobs` |
-| `GET`, `POST` | `/api/v1/issues` |
-| `GET` | `/api/v1/issues/review-queue` |
-| `GET`, `PATCH` | `/api/v1/issues/{issue_id}` |
-| `GET` | `/api/v1/jobs` |
-| `GET` | `/api/v1/jobs/{job_id}` |
-| `GET` | `/api/v1/jobs/{job_id}/detections` |
-| `GET` | `/api/v1/roads` |
-| `GET` | `/api/v1/roads/{road_id}` |
-| `GET` | `/api/v1/roads/{road_id}/issues` |
-| `GET` | `/api/v1/detections` |
-| `GET` | `/api/v1/detections/{detection_id}` |
-| `GET` | `/api/v1/detections/{detection_id}/evidence` |
-| `GET` | `/api/v1/analytics/overview` |
-| `GET` | `/api/v1/analytics/road-conditions` |
-| `GET` | `/api/v1/analytics/geographic` |
-| `GET` | `/api/v1/analytics/damage-distribution` |
+| Method | Endpoint | Auth |
+| --- | --- | --- |
+| `GET` | `/api/v1/auth/me` | Bearer |
+| `POST` | `/api/v1/inference/smoke-test` | Privileged |
+| `POST` | `/api/v1/inference/jobs` | Bearer |
+| `GET`, `POST` | `/api/v1/issues` | Bearer (`POST` privileged) |
+| `GET` | `/api/v1/issues/review-queue` | Bearer |
+| `GET`, `PATCH` | `/api/v1/issues/{issue_id}` | Bearer (`PATCH` privileged) |
+| `GET` | `/api/v1/jobs` | Bearer |
+| `GET` | `/api/v1/jobs/{job_id}` | Bearer + ownership |
+| `GET` | `/api/v1/jobs/{job_id}/detections` | Bearer + ownership |
+| `GET` | `/api/v1/evidence/{media_id}` | Bearer + ownership |
+| `GET` | `/api/v1/roads` | Bearer |
+| `GET` | `/api/v1/roads/{road_id}` | Bearer |
+| `GET` | `/api/v1/roads/{road_id}/issues` | Privileged |
+| `GET` | `/api/v1/detections` (and related) | Privileged |
+| `GET` | `/api/v1/analytics/*` | Privileged |
+
+`GET /test` remains unauthenticated. Privileged means
+`municipal_administrator` or `developer`. Cross-user job, detection, and
+evidence access returns **404**, not 403.
 
 The API handlers depend on the `InfraScanService` contract in
 `backend/app/services/contracts.py`. Infrastructure boundaries for media
@@ -74,6 +75,78 @@ placeholder data.
 Install backend dependencies with `python -m pip install -r backend/requirements.txt`.
 Run the API from the backend directory with `uvicorn main:app --reload`; the
 interactive API schema is available at `/docs`.
+
+### Authentication (Supabase Auth only)
+
+InfraScan uses **Supabase only for authentication**. Application data stays in
+the existing PostgreSQL database (`DATABASE_URL`). Media stays in Cloudflare R2.
+There is no Supabase Postgres migration, no PostGIS, no Supabase RLS, and no
+backend connection to Supabase's database. The API never needs
+`SUPABASE_JWT_SECRET`, a private key, or a service-role / secret key.
+
+Access tokens are **ES256** (ECC P-256) JWTs. FastAPI verifies them locally
+against the project's public JWKS at
+`https://<project-ref>.supabase.co/auth/v1/.well-known/jwks.json`. Verification
+checks signature, `kid`, issuer (`<SUPABASE_URL>/auth/v1`), audience
+(`authenticated`), expiration, and a UUID `sub`. Missing or invalid tokens
+return **401** with `WWW-Authenticate: Bearer`. Missing `SUPABASE_URL` or a JWKS
+outage returns **503**, not 401. Access tokens are never logged.
+
+#### Supported application roles
+
+Roles are read from the **signed** claim `app_metadata.role` only — never from
+user-editable `user_metadata`. Optional municipality is
+`app_metadata.municipality_id`. Missing or unsupported roles get least privilege
+(`citizen`).
+
+| Role | May submit media | Job / detection / evidence access |
+| --- | --- | --- |
+| `citizen` | yes | Own jobs only |
+| `maintenance_crew` | yes | Own jobs only (municipality tenancy deferred) |
+| `city_engineer` | yes | Own jobs only (municipality tenancy deferred) |
+| `municipal_administrator` | yes | All jobs, including historical `user_id IS NULL` |
+| `developer` | yes | All jobs, including historical `user_id IS NULL` |
+
+Initial ownership policy:
+
+1. Every authenticated role may submit an image or video.
+2. Ordinary users may access only jobs, detections, and evidence owned by their
+   authenticated user UUID (`InferenceJob.user_id` = JWT `sub`).
+3. `municipal_administrator` and `developer` may access all jobs.
+4. `maintenance_crew` and `city_engineer` remain owner-scoped until
+   municipality-wide tenancy is implemented.
+5. Historical jobs with `user_id IS NULL` are accessible only to
+   `municipal_administrator` and `developer`.
+6. Cross-user resource access returns **404**, not 403.
+7. `/test` and infrastructure health stay unauthenticated.
+8. Role changes require a **refreshed or new JWT** (sign out/in or wait for
+   supabase-js token refresh after updating `app_metadata` in the Supabase
+   dashboard).
+
+Issues remain shared map/review entities. Evidence thumbnails and supporting
+detections listed under an Issue are filtered to what the caller may open.
+
+`InferenceJob.user_id` is an external Supabase user UUID with **no foreign key**
+to `auth.users`. Authenticated submissions always set it; the column stays
+nullable only for historical rows. Clients must never send `user_id` in
+metadata.
+
+#### Local auth setup
+
+1. Create a Supabase project and set JWT signing to **ECC (ES256)** if it is not
+   already.
+2. Copy `.env.example` → `.env` and
+   `frontend/InfraScan frontend/.env.example` → `.env`. Fill placeholders:
+   - Backend / Compose: `SUPABASE_URL`, `CORS_ALLOWED_ORIGINS`
+   - Frontend: `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`
+3. Create test users under Authentication → Users (email/password). Assign roles
+   with a dashboard update of `app_metadata`, for example:
+   ```json
+   { "role": "citizen" }
+   ```
+   or `{ "role": "municipal_administrator", "municipality_id": "stanton" }`.
+4. Apply migrations (`alembic upgrade head`) so `ix_inference_jobs_user_id`
+   exists, then start the API and `npm run dev` in the frontend.
 
 ### Image inference submission contract
 
@@ -808,7 +881,8 @@ applying**:
 | `a1c3e5f70829` | Adds nullable `object_storage_key` to both media tables |
 | `b2d4f6a81930` | Makes media `data` nullable and requires `data` or `object_storage_key` |
 | `c3e5f7a92041` | Adds nonnegative `evidence_media.frame_timestamp` |
-| `d4f6a8b03152` (head) | Adds `detection_records.observed_at`; fills it from `captured_at` for still-image rows |
+| `d4f6a8b03152` | Adds `detection_records.observed_at`; fills it from `captured_at` for still-image rows |
+| `e5a7c9d14263` (head) | Indexes `inference_jobs.user_id` for owner-scoped reads (no FK to Supabase Auth) |
 
 All three media revisions preserve existing `BYTEA` rows. Downgrading
 `b2d4f6a81930` refuses to run while R2-only media rows exist, because their
@@ -900,6 +974,8 @@ without `ffmpeg`/`ffprobe`; the ExifTool cross-check is skipped without
 | `tests/test_issue_consolidation.py` | Matching rule (radius in meters, ties, types, statuses, low confidence, unlocated, unmapped), rollback, duplicate delivery, concurrent jobs, advisory lock, index use, backfill, `observed_at` migration |
 | `tests/test_issue_map.py` | Issue map/list/detail/review APIs and the Stanton–Anaheim seed |
 | `tests/test_r2_storage.py` | R2 adapter transfer settings and download caps with a fake S3 client |
+| `tests/test_auth.py` | ES256 JWKS verification, roles, CORS, 401/503, privileged routes (no real Supabase) |
+| `tests/test_job_ownership.py` | Submission ownership, 404 cross-user isolation, admin override, Issue evidence scoping |
 
 ## Possible Model Evaluation Metric for Model
 - mAP50-95
@@ -918,12 +994,14 @@ m    | 20.1M | 51.5%    | 183ms
 
 L    | 25.3M | 53.4%    | 239ms
 
-For local frontend development, the API allows cross-origin requests from
-`http://localhost:5173`.
+CORS origins come from `CORS_ALLOWED_ORIGINS` (comma-separated exact origins;
+default `http://localhost:5173`). The `Authorization` header is allowed. Do not
+configure Supabase CORS or Supabase Storage for this app.
 
 ## Local Docker development
 
-Copy `.env.example` to `.env`, then start the API and PostgreSQL:
+Copy `.env.example` to `.env` (and the frontend `.env.example`), fill
+`SUPABASE_URL` and R2 placeholders, then start the API and PostgreSQL:
 
 ```bash
 cp .env.example .env

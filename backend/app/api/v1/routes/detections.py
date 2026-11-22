@@ -4,11 +4,19 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
+from app.api.auth import require_privileged_user
 from app.api.dependencies import get_service
 from app.schemas import DetectionDTO, DetectionEvidenceDTO, Page
 from app.services.contracts import InfraScanService
 
-router = APIRouter(prefix="/detections", tags=["detections"])
+# Global detection reads span every user's jobs and are not owner-scoped, so
+# only developers and municipal administrators may use them. Others read their
+# detections through /jobs/{job_id}/detections.
+router = APIRouter(
+    prefix="/detections",
+    tags=["detections"],
+    dependencies=[Depends(require_privileged_user)],
+)
 
 
 @router.get("", response_model=Page[DetectionDTO])

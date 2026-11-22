@@ -479,6 +479,27 @@ tr.type-differs td {
   background: #fbf7fd;
 }
 
+.link-button-inline {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--accent-dark);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+tr.evidence-row td {
+  background: #f7f9f8;
+}
+
+tr.evidence-row .evidence-thumbnail {
+  max-width: 640px;
+  max-height: 420px;
+  margin: 0;
+  object-fit: contain;
+}
+
 .class-id {
   color: var(--muted);
   font-size: 0.8rem;

@@ -3,6 +3,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
+from app.api.auth import require_privileged_user
 from app.api.dependencies import get_service
 from app.schemas import (
     AnalyticsOverviewDTO,
@@ -12,7 +13,12 @@ from app.schemas import (
 )
 from app.services.contracts import InfraScanService
 
-router = APIRouter(prefix="/analytics", tags=["analytics"])
+# Aggregates over every user's detections; developers and municipal administrators only.
+router = APIRouter(
+    prefix="/analytics",
+    tags=["analytics"],
+    dependencies=[Depends(require_privileged_user)],
+)
 
 
 @router.get("/overview", response_model=AnalyticsOverviewDTO)

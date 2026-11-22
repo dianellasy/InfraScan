@@ -31,19 +31,21 @@ function renderMapHook(viewport: ViewportBounds) {
   );
 }
 
+// `request` reads the session token before calling fetch, so each timer advance
+// is awaited to let that promise settle.
 describe("useIssueMap", () => {
   it("debounces rapid viewport changes into one request for the latest viewport", async () => {
     vi.useFakeTimers();
     const { fetchMock, pending } = stubControllableFetch();
     const { rerender } = renderMapHook(first);
 
-    act(() => vi.advanceTimersByTime(DEBOUNCE_MS - 50));
+    await act(async () => vi.advanceTimersByTime(DEBOUNCE_MS - 50));
     rerender({ bounds: second });
-    act(() => vi.advanceTimersByTime(DEBOUNCE_MS - 50));
+    await act(async () => vi.advanceTimersByTime(DEBOUNCE_MS - 50));
     rerender({ bounds: third });
     expect(fetchMock).not.toHaveBeenCalled();
 
-    act(() => vi.advanceTimersByTime(DEBOUNCE_MS));
+    await act(async () => vi.advanceTimersByTime(DEBOUNCE_MS));
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(pending[0].url.searchParams.get("min_latitude")).toBe("33.8");
     expect(pending[0].url.searchParams.get("max_longitude")).toBe("-117.9");
@@ -54,11 +56,11 @@ describe("useIssueMap", () => {
     const { pending } = stubControllableFetch();
     const { result, rerender } = renderMapHook(first);
 
-    act(() => vi.advanceTimersByTime(DEBOUNCE_MS));
+    await act(async () => vi.advanceTimersByTime(DEBOUNCE_MS));
     expect(result.current.status).toBe("loading");
     rerender({ bounds: second });
     expect(pending[0].signal.aborted).toBe(true);
-    act(() => vi.advanceTimersByTime(DEBOUNCE_MS));
+    await act(async () => vi.advanceTimersByTime(DEBOUNCE_MS));
     expect(pending).toHaveLength(2);
 
     const fresh = collection([feature({ issue_id: "fresh" })]);

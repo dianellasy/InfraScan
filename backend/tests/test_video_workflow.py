@@ -36,6 +36,7 @@ from app.models import (
 )
 from app.services.inference_jobs import DatabaseInfraScanService
 from app.services.inference_processing import InferenceJobProcessor
+from auth_support import citizen_a, developer
 from postgres_support import run_alembic
 from test_inference_workflow import (
     FIXTURE_PATH,
@@ -127,12 +128,15 @@ class FrameRunner:
         return output, ANNOTATED_JPEG
 
 
-def build_client(service: DatabaseInfraScanService) -> TestClient:
+def build_client(
+    service: DatabaseInfraScanService, headers: dict[str, str] | None = None
+) -> TestClient:
+    """A client signed in as citizen A unless other `headers` are given."""
     app = FastAPI()
     app.state.infrascan_service = service
     register_exception_handlers(app)
     app.include_router(api_router, prefix="/api/v1")
-    return TestClient(app)
+    return TestClient(app, headers=citizen_a() if headers is None else headers)
 
 
 def submit_clip(client: TestClient, path: Path, metadata: dict = OFFSET):
@@ -601,7 +605,7 @@ def test_legacy_inline_evidence_is_still_served(session_factory) -> None:
     storage = StreamingMediaStorage()
     media_id = _legacy_job_with_evidence(session_factory, ANNOTATED_JPEG, None)
     service = DatabaseInfraScanService(session_factory, RecordingQueue(session_factory), storage)
-    with build_client(service) as client:
+    with build_client(service, developer()) as client:
         response = client.get(f"/api/v1/evidence/{media_id}")
     assert response.status_code == 200
     assert response.content == ANNOTATED_JPEG
@@ -614,7 +618,7 @@ def test_object_storage_evidence_is_served_and_unavailable_maps_to_503(session_f
     storage.objects[key] = (ANNOTATED_JPEG, "image/jpeg")
     media_id = _legacy_job_with_evidence(session_factory, None, key)
     service = DatabaseInfraScanService(session_factory, RecordingQueue(session_factory), storage)
-    with build_client(service) as client:
+    with build_client(service, developer()) as client:
         assert client.get(f"/api/v1/evidence/{media_id}").content == ANNOTATED_JPEG
         storage.fail_get = ConnectionError("r2 down")
         response = client.get(f"/api/v1/evidence/{media_id}")
