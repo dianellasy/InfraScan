@@ -1,11 +1,15 @@
 import infrascanLogo from "./assets/infrascan.svg";
-import { roleLabel, useAuth } from "./auth/AuthContext.ts";
+import { isPrivileged, roleLabel, useAuth } from "./auth/AuthContext.ts";
 import type { Route } from "./routing.ts";
 
-const LINKS: ReadonlyArray<{ href: string; label: string; routes: Route["name"][] }> = [
+type NavLink = { href: string; label: string; routes: Route["name"][]; privileged?: boolean };
+
+const LINKS: ReadonlyArray<NavLink> = [
+  { href: "#/overview", label: "Overview", routes: ["overview"] },
   { href: "#/", label: "Upload", routes: ["upload"] },
   { href: "#/map", label: "Issue map", routes: ["map", "issue"] },
   { href: "#/review", label: "Review queue", routes: ["review"] },
+  { href: "#/detections", label: "Detections", routes: ["detections", "detection"], privileged: true },
 ];
 
 function AccountMenu() {
@@ -25,15 +29,18 @@ function AccountMenu() {
 }
 
 export function TopBar({ route }: { route: Route["name"] }) {
+  const auth = useAuth();
+  // Outside AuthGate (isolated page tests) every link is shown.
+  const links = LINKS.filter((link) => !link.privileged || !auth || isPrivileged(auth.user));
   return (
     <header className="topbar">
-      <a className="brand" href="#/" aria-label="InfraScan home">
+      <a className="brand" href="#/overview" aria-label="InfraScan home">
         <img className="brand-mark" src={infrascanLogo} alt="" />
         <span>InfraScan</span>
       </a>
       <div className="topbar-end">
         <nav className="topbar-nav" aria-label="Main">
-          {LINKS.map((link) => (
+          {links.map((link) => (
             <a
               key={link.href}
               href={link.href}

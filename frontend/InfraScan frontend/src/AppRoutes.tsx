@@ -5,6 +5,9 @@ import { IssueMapPage } from "./issues/IssueMapPage.tsx";
 import { ReviewQueuePage } from "./issues/ReviewQueuePage.tsx";
 import { mapHref, useHashRoute } from "./routing.ts";
 import { TopBar } from "./TopBar.tsx";
+import { DetectionsPage } from "./detections/DetectionsPage.tsx";
+import DetectionReview from "./pages/DetectionReview.tsx";
+import Overview from "./pages/Overview.tsx";
 import "./App.css";
 
 function SignedInRoutes() {
@@ -21,6 +24,11 @@ function SignedInRoutes() {
           initialBounds={route.bounds}
           focusIssueId={route.issueId}
         />
+      )}
+      {route.name === "overview" && <Overview />}
+      {route.name === "detections" && <DetectionsPage />}
+      {route.name === "detection" && (
+        <DetectionReview key={route.detectionId} detectionId={route.detectionId} />
       )}
       {route.name === "review" && <ReviewQueuePage />}
       {route.name === "issue" && <IssueDetailPage key={route.issueId} issueId={route.issueId} />}

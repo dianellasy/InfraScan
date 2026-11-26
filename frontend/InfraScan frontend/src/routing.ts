@@ -3,7 +3,10 @@ import { normalizeViewport } from "./issues/api.ts";
 import type { ViewportBounds } from "./issues/types.ts";
 
 export type Route =
+  | { name: "overview" }
   | { name: "upload"; jobId?: string }
+  | { name: "detections" }
+  | { name: "detection"; detectionId: string }
   | { name: "map"; bounds?: ViewportBounds; issueId?: string }
   | { name: "review" }
   | { name: "issue"; issueId: string };
@@ -31,6 +34,10 @@ export function parseRoute(hash: string): Route {
     };
   }
   if (path === "/review") return { name: "review" };
+  if (path === "/overview") return { name: "overview" };
+  if (path === "/detections") return { name: "detections" };
+  const detection = /^\/detections\/([^/]+)$/.exec(path);
+  if (detection) return { name: "detection", detectionId: decodeURIComponent(detection[1]) };
   const issue = /^\/issues\/([^/]+)$/.exec(path);
   if (issue) return { name: "issue", issueId: decodeURIComponent(issue[1]) };
   const job = /^\/jobs\/([^/]+)$/.exec(path);
@@ -40,6 +47,10 @@ export function parseRoute(hash: string): Route {
 
 export function jobHref(jobId: string): string {
   return `#/jobs/${encodeURIComponent(jobId)}`;
+}
+
+export function detectionHref(detectionId: string): string {
+  return `#/detections/${encodeURIComponent(detectionId)}`;
 }
 
 export function issueHref(issueId: string): string {

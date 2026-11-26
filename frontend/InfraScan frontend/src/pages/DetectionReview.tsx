@@ -1,63 +1,108 @@
-
-import { useState } from "react";
-import infrascanLogo from "../assets/infrascan.svg";
+import { useEffect, useState } from "react";
+import { isPrivileged, useAuth } from "../auth/AuthContext.ts";
+import {
+  type ApiDetection,
+  type ReviewDecision,
+  fetchDetection,
+  formatLocation,
+  reviewIssue,
+  reviewState,
+  sourceLabel,
+} from "../detections/api.ts";
+import { EvidenceImage } from "../issues/EvidenceImage.tsx";
+import { issueHref } from "../routing.ts";
 import "../App.css";
 import "./DetectionReview.css";
 
-export default function DetectionReview() {
-  const navigate = (to: string | number) => {
-    if (to === -1) window.history.back();
-    else window.location.hash = `#${to}`;
-  };
+type Decision = "Unreviewed" | "Validated" | "Rejected";
 
-  const [decision, setDecision] = useState<
-    "Unreviewed" | "Validated" | "Rejected"
-  >("Unreviewed");
+type LoadState =
+  | { status: "loading" }
+  | { status: "error"; error: string }
+  | { status: "loaded"; detection: ApiDetection };
 
+const DECISION_STATUS: Record<Exclude<Decision, "Unreviewed">, ReviewDecision> = {
+  Validated: "accepted",
+  Rejected: "dismissed",
+};
+
+const SEVERITY_LABELS: Record<string, string> = {
+  critical: "High",
+  moderate: "Medium",
+  minor: "Low",
+};
+
+/**
+ * Inspect one detection and record a decision on the Issue it supports.
+ * Validating accepts the Issue, rejecting dismisses it; both leave the review queue.
+ */
+export default function DetectionReview({ detectionId }: { detectionId: string }) {
+  const auth = useAuth();
+  const allowed = !auth || isPrivileged(auth.user);
+  const [state, setState] = useState<LoadState>({ status: "loading" });
+  const [decision, setDecision] = useState<Decision>("Unreviewed");
   const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState("");
+
+  useEffect(() => {
+    if (!allowed) return;
+    const controller = new AbortController();
+    fetchDetection(detectionId, controller.signal)
+      .then((detection) => {
+        setState({ status: "loaded", detection });
+        setDecision(reviewState(detection.issue_status));
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setState({
+          status: "error",
+          error: error instanceof Error ? error.message : "Unable to load this detection.",
+        });
+      });
+    return () => controller.abort();
+  }, [allowed, detectionId]);
+
+  const detection = state.status === "loaded" ? state.detection : null;
+  const issueId = detection?.issue_id ?? null;
+
+  async function decide(next: Exclude<Decision, "Unreviewed">) {
+    if (!issueId) return;
+    setSaving(true);
+    setSaveError("");
+    setSaved(false);
+    try {
+      await reviewIssue(issueId, DECISION_STATUS[next], notes);
+      setDecision(next);
+      setSaved(true);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Unable to save the decision.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!allowed) {
+    return (
+      <p className="empty-state" role="status">
+        Detection review is available to municipal administrators and developers.
+      </p>
+    );
+  }
 
   return (
-    <main className="app-shell">
-      {/* InfraScan header */}
-      <header className="topbar">
-        <a
-          className="brand"
-          href="#/overview"
-          aria-label="InfraScan home"
-        >
-          <img
-            className="brand-mark"
-            src={infrascanLogo}
-            alt=""
-          />
-          <span>InfraScan</span>
-        </a>
-
-        <span className="topbar-note">
-          Road infrastructure inspection
-        </span>
-      </header>
-
+    <>
       {/* Page navigation */}
-      <nav
-        className="page-navigation"
-        aria-label="Page navigation"
-      >
-        <button
-          type="button"
-          className="navigation-button"
-          onClick={() => navigate("/detections")}
-        >
+      <nav className="page-navigation" aria-label="Page navigation">
+        <a className="navigation-button" href="#/detections">
           ← Back to Detections
-        </button>
-
-        <button
-          type="button"
-          className="navigation-button"
-          onClick={() => navigate("/overview")}
-        >
-          → Overview
-        </button>
+        </a>
+        {issueId && (
+          <a className="navigation-button" href={issueHref(issueId)}>
+            → Open issue
+          </a>
+        )}
       </nav>
 
       {/* Page heading */}
@@ -70,6 +115,13 @@ export default function DetectionReview() {
         </p>
       </section>
 
+      {state.status === "error" && (
+        <div className="error-banner" role="alert">
+          <strong>Could not load this detection</strong>
+          <span>{state.error}</span>
+        </div>
+      )}
+
       <div className="review-layout">
         {/* Detection evidence */}
         <section className="review-panel">
@@ -78,17 +130,24 @@ export default function DetectionReview() {
               <p className="eyebrow">EVIDENCE</p>
               <h2>Detection image</h2>
             </div>
-            <span className="review-tag">Preview</span>
+            <span className="review-tag">Model output</span>
           </div>
 
-          <div className="review-evidence-placeholder">
-            <span className="review-evidence-icon">▧</span>
-            <strong>No evidence image available</strong>
-            <p>
-              The original road image and detection
-              bounding box will appear here once connected.
-            </p>
-          </div>
+          {detection?.evidence_media ? (
+            <EvidenceImage
+              path={`/api/v1/evidence/${detection.evidence_media}`}
+              alt={`${detection.classification} with the model's detection boxes`}
+              className="review-evidence-image"
+            />
+          ) : (
+            <div className="review-evidence-placeholder">
+              <span className="review-evidence-icon">▧</span>
+              <strong>
+                {state.status === "loading" ? "Loading…" : "No evidence image available"}
+              </strong>
+              <p>The annotated road image appears here when the detection has one.</p>
+            </div>
+          )}
 
           <p className="review-help">
             Review the evidence before confirming whether
@@ -103,9 +162,8 @@ export default function DetectionReview() {
               <p className="eyebrow">INSPECTION DETAILS</p>
               <h2>Detection information</h2>
             </div>
-            <span
-              className={`review-status ${decision.toLowerCase()}`}
-            >
+
+            <span className={`review-status ${decision.toLowerCase()}`}>
               {decision}
             </span>
           </div>
@@ -113,32 +171,39 @@ export default function DetectionReview() {
           <div className="review-details">
             <div>
               <span>Detection ID</span>
-              <strong>Not connected</strong>
+              <strong title={detectionId}>{detectionId.slice(0, 8)}</strong>
             </div>
-
             <div>
               <span>Classification</span>
-              <strong>Not available</strong>
+              <strong>{detection?.classification ?? "—"}</strong>
             </div>
-
             <div>
               <span>Severity</span>
-              <strong>—</strong>
+              <strong>
+                {detection ? (SEVERITY_LABELS[detection.severity] ?? detection.severity) : "—"}
+              </strong>
             </div>
-
             <div>
               <span>Model confidence</span>
-              <strong>—</strong>
+              <strong>{detection ? `${(detection.confidence * 100).toFixed(1)}%` : "—"}</strong>
             </div>
-
             <div>
               <span>Location</span>
-              <strong>Not available</strong>
+              <strong>
+                {detection ? formatLocation(detection.latitude, detection.longitude) : "—"}
+              </strong>
             </div>
-
+            <div>
+              <span>Source</span>
+              <strong>{detection ? sourceLabel(detection) : "—"}</strong>
+            </div>
             <div>
               <span>Detection date</span>
-              <strong>—</strong>
+              <strong>
+                {detection
+                  ? new Date(detection.observed_at ?? detection.detected_at).toLocaleString()
+                  : "—"}
+              </strong>
             </div>
           </div>
         </section>
@@ -155,7 +220,7 @@ export default function DetectionReview() {
 
         <p className="review-description">
           Confirm whether this detection represents a real
-          road infrastructure issue.
+          road infrastructure issue. The decision applies to the issue it belongs to.
         </p>
 
         <label className="review-notes-label" htmlFor="review-notes">
@@ -167,6 +232,7 @@ export default function DetectionReview() {
           className="review-notes"
           placeholder="Add observations or reasons for your decision..."
           value={notes}
+          maxLength={2000}
           onChange={(event) => setNotes(event.target.value)}
           rows={4}
         />
@@ -175,7 +241,8 @@ export default function DetectionReview() {
           <button
             type="button"
             className="review-validate-button"
-            onClick={() => setDecision("Validated")}
+            disabled={!issueId || saving}
+            onClick={() => void decide("Validated")}
           >
             ✓ Validate detection
           </button>
@@ -183,30 +250,34 @@ export default function DetectionReview() {
           <button
             type="button"
             className="review-reject-button"
-            onClick={() => setDecision("Rejected")}
+            disabled={!issueId || saving}
+            onClick={() => void decide("Rejected")}
           >
             ✕ Reject detection
           </button>
 
-          <button
-            type="button"
-            className="review-cancel-button"
-            onClick={() => navigate("/detections")}
-          >
+          <a className="review-cancel-button" href="#/detections">
             Back to detections
-          </button>
+          </a>
         </div>
 
-        {decision !== "Unreviewed" && (
+        {detection && !issueId && (
           <p className="review-confirmation" role="status">
-            Detection marked as {decision.toLowerCase()}.
-            This is a frontend-only preview and has not
-            been saved to the backend.
+            This detection is not linked to an issue, so there is nothing to review.
           </p>
         )}
+        {saved && (
+          <p className="review-confirmation" role="status">
+            Saved: the issue is now {decision === "Validated" ? "accepted" : "dismissed"}.
+          </p>
+        )}
+        {saveError && (
+          <div className="error-banner" role="alert">
+            <strong>Could not save the decision</strong>
+            <span>{saveError}</span>
+          </div>
+        )}
       </section>
-
-      <footer>InfraScan · Road damage detection</footer>
-    </main>
+    </>
   );
 }

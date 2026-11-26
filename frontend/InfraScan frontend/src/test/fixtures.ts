@@ -103,9 +103,11 @@ export function imageResponse(body = "jpeg-bytes"): Response {
   });
 }
 
-export function stubFetch(handler: (url: URL) => Response | Promise<Response>) {
+export function stubFetch(
+  handler: (url: URL, init?: RequestInit) => Response | Promise<Response>,
+) {
   const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(
-    (input) => Promise.resolve(handler(new URL(String(input)))),
+    (input, init) => Promise.resolve(handler(new URL(String(input)), init)),
   );
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;

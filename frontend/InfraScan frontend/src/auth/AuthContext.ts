@@ -29,3 +29,14 @@ export function roleLabel(user: User): string {
   const role: unknown = user.app_metadata?.role;
   return (typeof role === "string" && ROLE_LABELS[role]) || ROLE_LABELS.citizen;
 }
+
+const PRIVILEGED_ROLES = new Set(["municipal_administrator", "developer"]);
+
+/**
+ * Display only, like `roleLabel`: whether to offer pages backed by privileged
+ * API routes (detection register, review decisions). The backend enforces it.
+ */
+export function isPrivileged(user: User): boolean {
+  const role: unknown = user.app_metadata?.role;
+  return typeof role === "string" && PRIVILEGED_ROLES.has(role);
+}
