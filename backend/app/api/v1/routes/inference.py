@@ -7,12 +7,14 @@ from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import BinaryIO
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from PIL import Image, UnidentifiedImageError
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import Headers
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.api.auth import CurrentUser, PrivilegedUser
@@ -27,6 +29,9 @@ from app.api.video_validation import (
 )
 from app.schemas import (
     APIErrorResponse,
+    DirectJobSubmission,
+    DirectUploadRequest,
+    DirectUploadTicket,
     InferenceJobAccepted,
     InferenceSubmissionMetadata,
     ResolvedVideoSubmission,
@@ -35,6 +40,9 @@ from app.schemas import (
 from app.services.contracts import (
     InfraScanService,
     SubmissionDependencyUnavailableError,
+    UploadAlreadySubmittedError,
+    UploadNotFoundError,
+    UploadTooLargeError,
 )
 from inference.celery.celery_app import celery_app
 from inference.video import MAX_VIDEO_BYTES, VideoRejected
@@ -49,11 +57,19 @@ _READ_CHUNK_SIZE = 1024 * 1024
 _HTTP_CONTENT_TOO_LARGE = 413
 _HTTP_UNPROCESSABLE_CONTENT = 422
 VIDEO_OFFSET_FIELD = "camera_utc_offset_minutes"
+IMAGE_CONTENT_TYPE = "image/jpeg"
+VIDEO_CONTENT_TYPE = "video/mp4"
+# Direct uploads are validated after a download to the function's temp
+# directory, so a deployment can cap videos below the 1 GB contract limit.
+DIRECT_UPLOAD_MAX_VIDEO_BYTES = min(
+    int(os.environ.get("INFRASCAN_DIRECT_UPLOAD_MAX_VIDEO_BYTES", MAX_VIDEO_BYTES)),
+    MAX_VIDEO_BYTES,
+)
 _IMAGE_ONLY_FIELDS = frozenset({"captured_at", "latitude", "longitude"})
 
 DEFAULT_WEIGHT_PATH = os.environ.get(
     "INFRASCAN_WEIGHT_PATH",
-    str(Path(__file__).resolve().parents[4] / "inference" / "weights" / "best.pt"),
+    str(Path(__file__).resolve().parents[4] / "inference" / "weights" / "best.onnx"),
 )
 SMOKE_IMAGE_PATH = (
     Path(__file__).resolve().parents[4] / "inference" / "data" / "uploads" / "multi.png"
@@ -556,7 +572,9 @@ _SUBMISSION_REQUEST_BODY = {
                 },
                 "additionalProperties": False,
             }
-        }
+        },
+        # Second step of a direct upload (see POST /api/v1/inference/uploads).
+        "application/json": {"schema": DirectJobSubmission.model_json_schema()},
     },
 }
 
@@ -627,6 +645,9 @@ async def submit_inference(
     user: CurrentUser,
     service: InfraScanService | None = Depends(_get_submission_service),
 ) -> InferenceJobAccepted | JSONResponse:
+    media_type = request.headers.get("content-type", "").partition(";")[0].strip().lower()
+    if media_type == "application/json":
+        return await _submit_direct_upload(request, user.id, service)
     try:
         upload, decoded = await _parse_multipart_request(request)
         metadata = await _validate_submission(upload, decoded)
@@ -661,6 +682,144 @@ async def submit_inference(
             "INTERNAL_ERROR",
             "An unexpected internal error occurred.",
         )
+
+
+def _direct_upload_limit(content_type: str) -> int:
+    return MAX_IMAGE_BYTES if content_type == IMAGE_CONTENT_TYPE else DIRECT_UPLOAD_MAX_VIDEO_BYTES
+
+
+def _too_large(content_type: str) -> JSONResponse:
+    kind = "image" if content_type == IMAGE_CONTENT_TYPE else "video"
+    return _error_response(
+        _HTTP_CONTENT_TOO_LARGE,
+        "FILE_TOO_LARGE",
+        f"The {kind} exceeds {_direct_upload_limit(content_type):,} bytes.",
+        "size_bytes",
+    )
+
+
+def _unavailable() -> JSONResponse:
+    return _error_response(
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        "SUBMISSION_DEPENDENCY_UNAVAILABLE",
+        "A required submission dependency is unavailable.",
+    )
+
+
+@router.post(
+    "/uploads",
+    status_code=status.HTTP_201_CREATED,
+    response_model=DirectUploadTicket,
+    summary="Get a signed URL to upload one JPEG or MP4 straight to object storage",
+    description=(
+        "Step 1 of a direct upload, used by the web app so large videos never pass "
+        "through the API. PUT the file to `upload_url` with exactly `headers`, then "
+        "start inference with POST /api/v1/inference/jobs and a JSON body "
+        "{upload_id, content_type, filename, metadata}. The same JPEG and MP4 "
+        "checks as the multipart upload run on the uploaded object."
+    ),
+    responses={
+        413: {"model": APIErrorResponse, "description": "FILE_TOO_LARGE"},
+        503: {"model": APIErrorResponse, "description": "Object storage unavailable"},
+    },
+)
+async def create_direct_upload(
+    body: DirectUploadRequest,
+    user: CurrentUser,
+    service: InfraScanService | None = Depends(_get_submission_service),
+) -> DirectUploadTicket | JSONResponse:
+    if body.size_bytes > _direct_upload_limit(body.content_type):
+        return _too_large(body.content_type)
+    if service is None:
+        return _unavailable()
+    try:
+        return await service.create_direct_upload(body.content_type, body.size_bytes, user.id)
+    except SubmissionDependencyUnavailableError:
+        return _unavailable()
+
+
+async def _submit_direct_upload(
+    request: Request, user_id: UUID, service: InfraScanService | None
+) -> InferenceJobAccepted | JSONResponse:
+    try:
+        body = DirectJobSubmission.model_validate_json(await request.body())
+    except ValidationError as exc:
+        first = exc.errors()[0] if exc.errors() else {}
+        field = ".".join(str(part) for part in first.get("loc", ())) or None
+        return _error_response(
+            _HTTP_UNPROCESSABLE_CONTENT,
+            "INVALID_REQUEST",
+            "The JSON body must be {upload_id, content_type, filename?, metadata}.",
+            field,
+        )
+    if service is None:
+        return _error_response(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "SERVICE_UNAVAILABLE",
+            "The inference submission service is not configured.",
+        )
+
+    try:
+        local, size = await service.fetch_direct_upload(
+            body.upload_id, body.content_type, user_id, _direct_upload_limit(body.content_type)
+        )
+    except UploadNotFoundError:
+        return _error_response(
+            _HTTP_UNPROCESSABLE_CONTENT,
+            "UPLOAD_NOT_FOUND",
+            "No uploaded file was found for this upload_id. Upload it first.",
+            "upload_id",
+        )
+    except UploadAlreadySubmittedError:
+        return _error_response(
+            status.HTTP_409_CONFLICT,
+            "UPLOAD_ALREADY_SUBMITTED",
+            "A job was already started for this upload_id.",
+            "upload_id",
+        )
+    except UploadTooLargeError:
+        return _too_large(body.content_type)
+    except SubmissionDependencyUnavailableError:
+        return _unavailable()
+
+    upload = StarletteUploadFile(
+        file=local,
+        size=size,
+        filename=body.filename,
+        headers=Headers({"content-type": body.content_type}),
+    )
+    try:
+        try:
+            metadata = await _validate_submission(upload, dict(body.metadata))
+            is_video = isinstance(metadata, ResolvedVideoSubmission)
+            if is_video != (body.content_type == VIDEO_CONTENT_TYPE):
+                raise _ContractError(
+                    status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                    "CONTENT_TYPE_MISMATCH",
+                    "The uploaded bytes do not match content_type.",
+                    "content_type",
+                )
+        except _ContractError as exc:
+            await service.discard_direct_upload(body.upload_id, body.content_type, user_id)
+            return _error_response(exc.status_code, exc.code, exc.message, exc.field)
+        except SubmissionDependencyUnavailableError:
+            return _unavailable()
+
+        try:
+            return await service.submit_direct_upload(
+                body.upload_id, body.content_type, body.filename, metadata, user_id
+            )
+        except SubmissionDependencyUnavailableError:
+            return _unavailable()
+        except Exception:
+            logger.exception("Unexpected direct-upload submission failure")
+            return _error_response(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "INTERNAL_ERROR",
+                "An unexpected internal error occurred.",
+            )
+    finally:
+        await upload.close()
 
 
 @router.post(

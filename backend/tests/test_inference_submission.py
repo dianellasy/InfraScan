@@ -340,9 +340,23 @@ def test_rejects_missing_metadata(
 def test_rejects_non_multipart_request(
     client: TestClient, service: FakeSubmissionService
 ) -> None:
-    response = client.post("/api/v1/inference/jobs", json=VALID_METADATA)
+    response = client.post(
+        "/api/v1/inference/jobs",
+        content=json.dumps(VALID_METADATA),
+        headers={"content-type": "text/plain"},
+    )
 
     assert_error(response, 415, "UNSUPPORTED_REQUEST_MEDIA_TYPE", None)
+    assert service.calls == []
+
+
+def test_json_body_must_reference_a_direct_upload(
+    client: TestClient, service: FakeSubmissionService
+) -> None:
+    # JSON is the second step of a direct upload, not inline metadata.
+    response = client.post("/api/v1/inference/jobs", json=VALID_METADATA)
+
+    assert_error(response, 422, "INVALID_REQUEST", "upload_id")
     assert service.calls == []
 
 

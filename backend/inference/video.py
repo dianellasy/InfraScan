@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
 
+from inference import media_tools
+
 FFPROBE_BIN = os.environ.get("INFRASCAN_FFPROBE", "ffprobe")
 FFMPEG_BIN = os.environ.get("INFRASCAN_FFMPEG", "ffmpeg")
 
@@ -119,8 +121,11 @@ def run_bounded(
     args: Sequence[str], *, timeout: float, max_stdout: int, max_stderr: int = 64 << 10
 ) -> tuple[bytes, bytes]:
     """Run a tool with capped stdout/stderr; raise MediaToolError on any failure."""
+    args = list(args)
+    if args and args[0] in media_tools.TOOLS:
+        args[0] = media_tools.tool_path(args[0])
     proc = subprocess.Popen(
-        list(args),
+        args,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

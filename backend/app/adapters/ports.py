@@ -52,6 +52,20 @@ class MediaStorageAdapter(Protocol):
         """Delete an object; deleting a missing key is not an error."""
         ...
 
+
+class DirectUploadStorageAdapter(MediaStorageAdapter, Protocol):
+    """Storage the browser can upload to directly with a short-lived signed URL."""
+
+    def presign_put(
+        self, key: str, content_type: str, content_length: int, expires_in: int
+    ) -> str:
+        """A URL accepting one PUT of exactly `content_length` bytes of `content_type`."""
+        ...
+
+    def size(self, key: str) -> int | None:
+        """Size in bytes of a stored object, or None if it does not exist."""
+        ...
+
 class InferenceJobRepositoryAdapter(Protocol):
     def create_pending(
         self, media: StoredMedia, metadata: InferenceSubmissionMetadata, user_id: UUID

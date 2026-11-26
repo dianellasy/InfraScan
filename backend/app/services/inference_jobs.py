@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import tempfile
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, BinaryIO, NoReturn
@@ -12,7 +13,11 @@ from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from app.adapters.ports import InferenceQueueAdapter, MediaStorageAdapter
+from app.adapters.ports import (
+    DirectUploadStorageAdapter,
+    InferenceQueueAdapter,
+    MediaStorageAdapter,
+)
 from app.authorization import JobAccess
 from app.models import InferenceJob
 from app.repositories import (
@@ -23,6 +28,7 @@ from app.repositories import (
 from app.schemas import (
     BoundingBox,
     DetectionDTO,
+    DirectUploadTicket,
     InferenceJobAccepted,
     InferenceJobDTO,
     InferenceMetadata,
@@ -38,10 +44,16 @@ from app.services.contracts import (
     IssueNotFoundError,
     JobNotFoundError,
     SubmissionDependencyUnavailableError,
+    UploadAlreadySubmittedError,
+    UploadNotFoundError,
+    UploadTooLargeError,
 )
 from app.services.dto import detection_to_dto
 from app.services.issues import EvidenceImage, IssueQueries
-from app.services.object_keys import input_media_key
+from app.services.object_keys import direct_upload_key, input_media_key
+
+# A signed upload URL is valid this long; the browser starts the PUT at once.
+DIRECT_UPLOAD_URL_TTL_SECONDS = 15 * 60
 
 __all__ = ["DatabaseInfraScanService", "detection_to_dto", "job_to_dto"]
 
@@ -120,6 +132,112 @@ class DatabaseInfraScanService:
             key,
             content_type,
             file.filename,
+            metadata,
+            user_id,
+        )
+        await run_in_threadpool(self._publish, accepted.job_id)
+        return accepted
+
+    # --- Direct browser uploads -------------------------------------------------
+    #
+    # 1. `create_direct_upload` signs a PUT URL for a new upload ID.
+    # 2. The browser PUTs the file straight to object storage (no API body limit).
+    # 3. `fetch_direct_upload` gives the API a local copy to validate with the
+    #    same checks as a multipart upload.
+    # 4. `submit_direct_upload` commits the job and publishes it, exactly as
+    #    `submit_inference` does after its own upload.
+
+    def _direct_storage(self) -> DirectUploadStorageAdapter:
+        storage = self._media_storage
+        if storage is None or not hasattr(storage, "presign_put"):
+            logger.error("Direct uploads need object storage that can sign URLs")
+            raise SubmissionDependencyUnavailableError
+        return storage  # type: ignore[return-value]
+
+    async def create_direct_upload(
+        self, content_type: str, size_bytes: int, user_id: UUID
+    ) -> DirectUploadTicket:
+        storage = self._direct_storage()
+        upload_id = uuid4()
+        key = direct_upload_key(user_id, upload_id, content_type)
+        try:
+            url = await run_in_threadpool(
+                storage.presign_put, key, content_type, size_bytes, DIRECT_UPLOAD_URL_TTL_SECONDS
+            )
+        except Exception as exc:
+            logger.exception("Could not sign a direct upload URL")
+            raise SubmissionDependencyUnavailableError from exc
+        return DirectUploadTicket(
+            upload_id=upload_id,
+            upload_url=url,
+            headers={"Content-Type": content_type},
+            expires_in_seconds=DIRECT_UPLOAD_URL_TTL_SECONDS,
+        )
+
+    async def fetch_direct_upload(
+        self, upload_id: UUID, content_type: str, user_id: UUID, max_bytes: int
+    ) -> tuple[BinaryIO, int]:
+        """Download the caller's uploaded object to a local spooled file for validation."""
+        storage = self._direct_storage()
+        key = direct_upload_key(user_id, upload_id, content_type)
+        return await run_in_threadpool(
+            self._fetch_direct_upload, storage, upload_id, key, max_bytes
+        )
+
+    def _fetch_direct_upload(
+        self, storage: DirectUploadStorageAdapter, upload_id: UUID, key: str, max_bytes: int
+    ) -> tuple[BinaryIO, int]:
+        try:
+            with self._session_factory() as session:
+                if InputMediaRepository(session).exists(upload_id):
+                    raise UploadAlreadySubmittedError(upload_id)
+            size = storage.size(key)
+        except UploadAlreadySubmittedError:
+            raise
+        except Exception as exc:
+            logger.exception("Could not look up direct upload %s", upload_id)
+            raise SubmissionDependencyUnavailableError from exc
+        if size is None:
+            raise UploadNotFoundError(upload_id)
+        if size > max_bytes:
+            self._delete_object(key)
+            raise UploadTooLargeError(size)
+        # JPEGs stay in memory; videos spill to the temp directory.
+        local = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024)
+        try:
+            storage.download_to_file(key, local, max_bytes)
+        except Exception as exc:
+            local.close()
+            logger.exception("Could not download direct upload %s", upload_id)
+            raise SubmissionDependencyUnavailableError from exc
+        local.seek(0)
+        return local, size
+
+    async def discard_direct_upload(
+        self, upload_id: UUID, content_type: str, user_id: UUID
+    ) -> None:
+        """Delete an upload that failed validation (never one a job already uses)."""
+        if self._media_storage is None:
+            return
+        key = direct_upload_key(user_id, upload_id, content_type)
+        await run_in_threadpool(self._delete_object, key)
+
+    async def submit_direct_upload(
+        self,
+        upload_id: UUID,
+        content_type: str,
+        filename: str | None,
+        metadata: InferenceSubmissionMetadata,
+        user_id: UUID,
+    ) -> InferenceJobAccepted:
+        self._direct_storage()
+        key = direct_upload_key(user_id, upload_id, content_type)
+        accepted = await run_in_threadpool(
+            self._create_pending_job,
+            upload_id,
+            key,
+            content_type,
+            filename,
             metadata,
             user_id,
         )

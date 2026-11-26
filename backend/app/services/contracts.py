@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Protocol
+from typing import BinaryIO, Protocol
 from uuid import UUID
 
 from fastapi import UploadFile
@@ -11,6 +11,7 @@ from app.schemas import (
     DamageDistributionDTO,
     DetectionDTO,
     DetectionEvidenceDTO,
+    DirectUploadTicket,
     GeographicAggregateDTO,
     InferenceJobAccepted,
     InferenceJobDTO,
@@ -30,6 +31,22 @@ from app.services.issues import EvidenceImage, EvidenceUnavailableError  # noqa:
 
 class SubmissionDependencyUnavailableError(Exception):
     """A required storage, persistence, or queue dependency is unavailable."""
+
+
+class UploadNotFoundError(LookupError):
+    """No uploaded object exists for this caller's upload ID."""
+
+
+class UploadAlreadySubmittedError(Exception):
+    """A job already uses this upload ID."""
+
+
+class UploadTooLargeError(ValueError):
+    """The uploaded object is larger than the contract allows."""
+
+    def __init__(self, size_bytes: int) -> None:
+        super().__init__(size_bytes)
+        self.size_bytes = size_bytes
 
 
 class JobNotFoundError(LookupError):
@@ -64,6 +81,39 @@ class InfraScanService(Protocol):
         consume it. Dispatch failures must be handled explicitly by the
         implementation.
         """
+        ...
+
+    async def create_direct_upload(
+        self, content_type: str, size_bytes: int, user_id: UUID
+    ) -> DirectUploadTicket:
+        """Sign a short-lived URL for the browser to upload one file to storage."""
+        ...
+
+    async def fetch_direct_upload(
+        self, upload_id: UUID, content_type: str, user_id: UUID, max_bytes: int
+    ) -> tuple[BinaryIO, int]:
+        """Local copy (and size) of the caller's uploaded object, for validation.
+
+        Raises UploadNotFoundError, UploadAlreadySubmittedError, or
+        UploadTooLargeError (after deleting the object).
+        """
+        ...
+
+    async def discard_direct_upload(
+        self, upload_id: UUID, content_type: str, user_id: UUID
+    ) -> None:
+        """Delete an uploaded object that failed validation."""
+        ...
+
+    async def submit_direct_upload(
+        self,
+        upload_id: UUID,
+        content_type: str,
+        filename: str | None,
+        metadata: InferenceSubmissionMetadata,
+        user_id: UUID,
+    ) -> InferenceJobAccepted:
+        """Commit and publish a job for an already uploaded, validated object."""
         ...
 
     async def list_issue_map(

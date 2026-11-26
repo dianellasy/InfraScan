@@ -14,6 +14,7 @@ from typing import BinaryIO
 import boto3
 from boto3.s3.transfer import TransferConfig
 from botocore.config import Config
+from botocore.exceptions import ClientError
 
 # `get` is for JPEG-sized objects only; video goes through `download_to_file`.
 MAX_GET_BYTES = 32 * 1024 * 1024
@@ -83,3 +84,34 @@ class R2MediaStorageAdapter:
 
     def delete(self, key: str) -> None:
         self._s3.delete_object(Bucket=self._bucket, Key=key)
+
+    def presign_put(
+        self, key: str, content_type: str, content_length: int, expires_in: int
+    ) -> str:
+        """A URL the browser can PUT exactly `content_length` bytes of `content_type` to.
+
+        Both headers are part of the signature, so R2 rejects a different
+        type or size. The bucket needs a CORS rule allowing PUT from the
+        frontend origin (see scripts/configure_r2_cors.py).
+        """
+        return self._s3.generate_presigned_url(
+            "put_object",
+            Params={
+                "Bucket": self._bucket,
+                "Key": key,
+                "ContentType": content_type,
+                "ContentLength": content_length,
+            },
+            ExpiresIn=expires_in,
+            HttpMethod="PUT",
+        )
+
+    def size(self, key: str) -> int | None:
+        """Size in bytes of a stored object, or None if it does not exist."""
+        try:
+            response = self._s3.head_object(Bucket=self._bucket, Key=key)
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in {"404", "NoSuchKey", "NotFound"}:
+                return None
+            raise
+        return int(response["ContentLength"])

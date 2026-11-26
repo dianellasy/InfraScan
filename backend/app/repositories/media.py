@@ -34,6 +34,9 @@ class InputMediaRepository:
         self._session.flush()
         return media
 
+    def exists(self, media_id: UUID) -> bool:
+        return self._session.get(InputMedia, media_id) is not None
+
 
 class EvidenceMediaRepository:
     def __init__(self, session: Session) -> None:

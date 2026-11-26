@@ -1,3 +1,10 @@
+best.onnx = the deployed model. It is best.pt exported with ultralytics 8.4.210:
+    YOLO("best.pt").export(format="onnx", imgsz=640, dynamic=True, simplify=True, opset=17)
+inference/service.py runs it with ONNX Runtime (no torch/ultralytics needed).
+scripts/check_onnx_parity.py checks it against ultralytics: on the 17 demo photos
+every photo gives the same number of boxes, matched boxes IoU >= 0.90 and
+confidence within 0.05. Re-export and re-run that check whenever best.pt changes.
+
 best.pt = infrascan-yolo26s-rdd2022-cmird, version v1 (run e7, trained 18 Nov 2026).
 YOLO26s trained on RDD2022 India + United States (leak-free split) plus CMIRD Indian motorbike frames.
 4 classes, order: 0 Longitudinal crack, 1 Transverse crack, 2 Alligator crack, 3 Pothole. Input size 640.

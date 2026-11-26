@@ -113,6 +113,40 @@ class InferenceJobAccepted(BaseModel):
     submitted_at: Annotated[AwareDatetime, AfterValidator(_normalize_utc)]
 
 
+DirectUploadContentType = Literal["image/jpeg", "video/mp4"]
+
+
+class DirectUploadRequest(BaseModel):
+    """Ask for a signed URL to upload one JPEG or MP4 straight to object storage."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    content_type: DirectUploadContentType
+    size_bytes: int = Field(gt=0, description="Exact size of the file that will be uploaded.")
+
+
+class DirectUploadTicket(BaseModel):
+    upload_id: UUID
+    upload_url: str = Field(description="PUT the file here, with exactly `headers`.")
+    method: Literal["PUT"] = "PUT"
+    headers: dict[str, str]
+    expires_in_seconds: int
+
+
+class DirectJobSubmission(BaseModel):
+    """Start inference on a file already uploaded with a `DirectUploadTicket`.
+
+    `metadata` follows the same contract as the multipart `metadata` part.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    upload_id: UUID
+    content_type: DirectUploadContentType
+    filename: str | None = Field(default=None, max_length=255)
+    metadata: dict[str, object]
+
+
 class InferenceJobDTO(InferenceJobAccepted):
     status: str
     submitted_at: datetime

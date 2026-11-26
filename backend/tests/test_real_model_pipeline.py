@@ -1,7 +1,7 @@
-"""Real v0-mvp model path. Skipped unless ultralytics and the weights are available.
+"""Real model path. Skipped unless onnxruntime and the weights are available.
 
 Unlike `test_inference_workflow.py`, nothing here mocks the model: these
-tests load `inference/weights/best.pt` and run YOLO on CPU.
+tests load `inference/weights/best.onnx` and run it on CPU.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from uuid import UUID
 
 import pytest
 
-pytest.importorskip("ultralytics")
+pytest.importorskip("onnxruntime")
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -55,8 +55,8 @@ class InMemoryMediaStorage:
 
 def test_service_uses_central_label_map() -> None:
     assert inference.label_map is CLASS_LABELS
-    assert inference.MODEL_NAME == "infrascan-rdd2022-yolo11s"
-    assert inference.MODEL_VERSION == "v0-mvp"
+    assert inference.MODEL_NAME == "infrascan-yolo26s-rdd2022-cmird"
+    assert inference.MODEL_VERSION == "v1"
 
 
 @pytest.mark.skipif(not SMOKE_IMAGE.is_file(), reason="Original multi.png reference fixture is not present")
@@ -111,7 +111,7 @@ def test_prediction_source_applies_exif_orientation() -> None:
     exif[274] = 6  # Stored landscape pixels displayed 90 degrees clockwise.
     buffer = BytesIO()
     image.save(buffer, format="JPEG", exif=exif)
-    source = inference._as_predict_source(buffer.getvalue())
+    source = inference._load_image(buffer.getvalue())
     assert source.size == (600, 800)
     assert source.getexif().get(274, 1) == 1
 

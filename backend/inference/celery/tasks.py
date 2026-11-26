@@ -1,7 +1,6 @@
 import base64
 import logging
 import os
-import time
 from pathlib import Path
 from uuid import UUID
 
@@ -21,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 @worker_process_init.connect
 def preload_model(**kwargs):
-    """Warm YOLO weights in each prefork child so the first task is not a cold load."""
+    """Warm the ONNX model in each prefork child so the first task is not a cold load."""
     if Path(DEFAULT_WEIGHT_PATH).exists():
         get_model(DEFAULT_WEIGHT_PATH)
 
@@ -45,7 +44,6 @@ def add(x, y):
 def inference_worker(weight_path, image_b64, filename=None):
     resolved_weight = weight_path or DEFAULT_WEIGHT_PATH
     image_bytes = base64.b64decode(image_b64)
-    time.sleep(4)
     result = inference_service(resolved_weight, image_bytes, filename=filename)
     return {"status": "completed", "result": result}
 

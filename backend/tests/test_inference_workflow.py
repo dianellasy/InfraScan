@@ -3,7 +3,7 @@
 Worker tests use `tests/fixtures/v0_mvp_multi_png_output.json`, the exact
 output of the shipped v0-mvp weights on `inference/data/uploads/multi.png`,
 with a mocked runner. The real model path is covered in
-`test_real_model_pipeline.py` when ultralytics is installed.
+`test_real_model_pipeline.py` when onnxruntime is installed.
 """
 
 from __future__ import annotations

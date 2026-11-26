@@ -1,0 +1,36 @@
+# Vercel builds the backend from this file (Celery on Vercel requires
+# pyproject.toml). Keep [project].dependencies in sync with requirements.txt,
+# which Docker Compose and local development use. uvicorn is left out:
+# Vercel serves the ASGI app itself.
+[project]
+name = "infrascan-backend"
+version = "1.0.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "pydantic>=2,<3",
+  "python-multipart>=0.0.20,<1",
+  "celery>=5.4,<6",
+  "pillow>=10.1",
+  "numpy>=1.26,<3",
+  "onnxruntime>=1.20,<2",
+  "sqlalchemy>=2,<3",
+  "psycopg[binary]>=3,<4",
+  "alembic>=1.14,<2",
+  "boto3>=1,<2",
+  "python-dotenv>=1,<2",
+  "uuid7>=0.1,<1",
+  "PyJWT[crypto]>=2.10,<3",
+]
+
+# Public web app: the FastAPI `app` in main.py.
+[tool.vercel]
+entrypoint = "main:app"
+
+# Private, queue-triggered function that runs the Celery tasks.
+[[tool.vercel.subscribers]]
+entrypoint = "worker:app"
+
+# Downloads static ffmpeg/ffprobe for the MP4 pipeline (see scripts/vercel_build.py).
+[tool.vercel.scripts]
+build = "python scripts/vercel_build.py"
