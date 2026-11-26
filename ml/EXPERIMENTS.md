@@ -259,3 +259,28 @@ next step. Numbers here only come from real logs saved under `ml/reports/`.
   Paired e7 minus e4: pothole AP50 -0.004 (95% interval -0.038 to +0.033), recall at 0.25 +0.047 (+0.010 to
   +0.082). Same picture as val: equal box score, more potholes found, a few more false alarms. Files:
   `ml/reports/e7_yolo26s_cmird_holdout/eval_test.json`, `test_compare_vs_e4.json`.
+
+## 11. v2 candidate (run v1_yolo26m_1024): YOLO26m, 1024, 19 epochs (19 to 20 Nov 2026)
+
+- Data prep for this run used the v2 version of the prep script, kept as `ml/data/prepare_rdd2022_v2.py` (it adds `--manhole`, `--dup-groups`, `--max-side`, `--limit` and `resplit_existing`). Its Kaggle kernels (`ml/kaggle/v1_*`) expect it as `prepare_rdd2022.py`, so copy it under that name when rebuilding them. Not the deployed model: the app ships v1 (e7).
+
+
+- Config: yolo26m.pt (COCO), imgsz 1024, 5 classes (adds D50 Manhole cover),
+  Kaggle GPU T4 x2 DDP, batch 16, time=7.75 h (19 epochs), close_mosaic 3,
+  hsv_v 0.5, seed 42. Plan and decisions: `ml/V1_TRAINING_PLAN.md`.
+- Split: b0 block split, minus 765 val/test images with a near-duplicate in
+  another split. Train 30,529, val 3,438, test 3,653.
+- Speed benchmark (1024, T4 x2, full epoch): 26s 11.4 min, 26m 24.0 min,
+  26l 30.4 min.
+- Test: mAP50 0.651, mAP50-95 0.340. Pothole AP50 0.494, at conf 0.25 P 0.62
+  R 0.43. Manhole cover AP50 0.873.
+- vs b0 on 3,653 images unseen by both (classes 0-3): mAP50 0.596 vs 0.579.
+- vs e7 (Adarsh, YOLO26s 640, India + US + CMIRD) on the v2 test split:
+  all countries 0.596 vs 0.404, but India 0.361 vs 0.586 and US 0.675 vs 0.743.
+  e7 likely trained on many of those India/US images, so its lead there is
+  partly leakage. Raw: `ml/reports/v1_yolo26m_1024/h2h_v2_vs_e7.json`.
+- Learned: still improving at the last epoch (undertrained). India stays weak
+  without Indian data beyond RDD2022.
+- Decision (20 Nov, 09:45): keep e7 live; this model goes up as a draft PR.
+- Next: one shared, published split; train the bigger 1024 recipe on
+  RDD2022 + CMIRD; more GPU time.

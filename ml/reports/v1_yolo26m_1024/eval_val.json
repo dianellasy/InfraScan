@@ -1,0 +1,376 @@
+{
+ "split": "val",
+ "imgsz": 1024,
+ "ultralytics": {
+  "overall": {
+   "precision": 0.6794251113813607,
+   "recall": 0.6004118488523671,
+   "mAP50": 0.6518931539059547,
+   "mAP50_95": 0.3455289224644891
+  },
+  "per_class": {
+   "Longitudinal crack": {
+    "precision": 0.6552129196277208,
+    "recall": 0.5763585878619596,
+    "AP50": 0.6159760209125782,
+    "AP50_95": 0.34107618760188174
+   },
+   "Transverse crack": {
+    "precision": 0.6133863772256744,
+    "recall": 0.5671111111111111,
+    "AP50": 0.5959911949310386,
+    "AP50_95": 0.294104461754244
+   },
+   "Alligator crack": {
+    "precision": 0.6782382983962637,
+    "recall": 0.5708869590916764,
+    "AP50": 0.6557458036567875,
+    "AP50_95": 0.3556003394443561
+   },
+   "Pothole": {
+    "precision": 0.6344377084698797,
+    "recall": 0.45016757219148595,
+    "AP50": 0.5142954208801813,
+    "AP50_95": 0.23238162506234644
+   },
+   "Manhole cover": {
+    "precision": 0.8158502531872652,
+    "recall": 0.8375350140056023,
+    "AP50": 0.8774573291491881,
+    "AP50_95": 0.5044819984596176
+   }
+  },
+  "save_dir": "/kaggle/working/runs/detect/val_val"
+ },
+ "per_country": {
+  "China_Drone": {
+   "images": 187,
+   "precision": 0.6917681692243253,
+   "recall": 0.5989099861104947,
+   "mAP50": 0.6755080626055568,
+   "mAP50_95": 0.37579274186020784,
+   "per_class_AP50": {
+    "Longitudinal crack": 0.6061812956277275,
+    "Transverse crack": 0.824278935171477,
+    "Alligator crack": 0.3865720196230229,
+    "Pothole": 0.885
+   }
+  },
+  "China_MotorBike": {
+   "images": 133,
+   "precision": 0.8132927005030924,
+   "recall": 0.7970183699933725,
+   "mAP50": 0.8846066887168909,
+   "mAP50_95": 0.5283871612875458,
+   "per_class_AP50": {
+    "Longitudinal crack": 0.8515741834635089,
+    "Transverse crack": 0.872771156746615,
+    "Alligator crack": 0.8394202137893421,
+    "Pothole": 0.9746612008680975
+   }
+  },
+  "Czech": {
+   "images": 257,
+   "precision": 0.49293899645607575,
+   "recall": 0.40258835388994313,
+   "mAP50": 0.4328717667144203,
+   "mAP50_95": 0.16315743898262833,
+   "per_class_AP50": {
+    "Longitudinal crack": 0.5422949501022918,
+    "Transverse crack": 0.39256614433116105,
+    "Alligator crack": 0.42523923913236883,
+    "Pothole": 0.37138673329185934
+   }
+  },
+  "India": {
+   "images": 644,
+   "precision": 0.554536483467279,
+   "recall": 0.4376653023937159,
+   "mAP50": 0.42622991608985217,
+   "mAP50_95": 0.19206263176788924,
+   "per_class_AP50": {
+    "Longitudinal crack": 0.4242209699207995,
+    "Transverse crack": 0.27796747967479674,
+    "Alligator crack": 0.5833518943818574,
+    "Pothole": 0.419379320381955
+   }
+  },
+  "Japan": {
+   "images": 1011,
+   "precision": 0.658751057492555,
+   "recall": 0.5984478924713106,
+   "mAP50": 0.6508944851448952,
+   "mAP50_95": 0.3344984941878477,
+   "per_class_AP50": {
+    "Longitudinal crack": 0.5159692844720476,
+    "Transverse crack": 0.5020758546434241,
+    "Alligator crack": 0.7120764275757678,
+    "Pothole": 0.6468147991936308,
+    "Manhole cover": 0.8775360598396054
+   }
+  },
+  "Norway": {
+   "images": 707,
+   "precision": 0.483620741232347,
+   "recall": 0.3143667136976877,
+   "mAP50": 0.3293374140876832,
+   "mAP50_95": 0.14837474522934557,
+   "per_class_AP50": {
+    "Longitudinal crack": 0.5240114561754262,
+    "Transverse crack": 0.3914130908370666,
+    "Alligator crack": 0.1374243332826284,
+    "Pothole": 0.26450077605561145
+   }
+  },
+  "United_States": {
+   "images": 499,
+   "precision": 0.5701799248965771,
+   "recall": 0.5596900548604773,
+   "mAP50": 0.6245330766823167,
+   "mAP50_95": 0.37606512791638524,
+   "per_class_AP50": {
+    "Longitudinal crack": 0.7816361002699407,
+    "Transverse crack": 0.6890624603697219,
+    "Alligator crack": 0.6912143407735013,
+    "Pothole": 0.3362194053161031
+   }
+  }
+ },
+ "own_iou50": {
+  "0.15": {
+   "Longitudinal crack": {
+    "precision": 0.5324,
+    "recall": 0.6462,
+    "f1": 0.5838,
+    "mean_iou_tp": 0.7709,
+    "tp": 1629,
+    "fp": 1431,
+    "gt": 2521
+   },
+   "Transverse crack": {
+    "precision": 0.4813,
+    "recall": 0.6302,
+    "f1": 0.5458,
+    "mean_iou_tp": 0.7488,
+    "tp": 709,
+    "fp": 764,
+    "gt": 1125
+   },
+   "Alligator crack": {
+    "precision": 0.5725,
+    "recall": 0.65,
+    "f1": 0.6088,
+    "mean_iou_tp": 0.7674,
+    "tp": 624,
+    "fp": 466,
+    "gt": 960
+   },
+   "Pothole": {
+    "precision": 0.5308,
+    "recall": 0.5154,
+    "f1": 0.5229,
+    "mean_iou_tp": 0.7301,
+    "tp": 302,
+    "fp": 267,
+    "gt": 586
+   },
+   "Manhole cover": {
+    "precision": 0.7575,
+    "recall": 0.8487,
+    "f1": 0.8005,
+    "mean_iou_tp": 0.7904,
+    "tp": 303,
+    "fp": 97,
+    "gt": 357
+   }
+  },
+  "0.25": {
+   "Longitudinal crack": {
+    "precision": 0.669,
+    "recall": 0.5347,
+    "f1": 0.5944,
+    "mean_iou_tp": 0.7827,
+    "tp": 1348,
+    "fp": 667,
+    "gt": 2521
+   },
+   "Transverse crack": {
+    "precision": 0.6191,
+    "recall": 0.5244,
+    "f1": 0.5679,
+    "mean_iou_tp": 0.7596,
+    "tp": 590,
+    "fp": 363,
+    "gt": 1125
+   },
+   "Alligator crack": {
+    "precision": 0.6991,
+    "recall": 0.5542,
+    "f1": 0.6182,
+    "mean_iou_tp": 0.7775,
+    "tp": 532,
+    "fp": 229,
+    "gt": 960
+   },
+   "Pothole": {
+    "precision": 0.6667,
+    "recall": 0.4334,
+    "f1": 0.5253,
+    "mean_iou_tp": 0.741,
+    "tp": 254,
+    "fp": 127,
+    "gt": 586
+   },
+   "Manhole cover": {
+    "precision": 0.8305,
+    "recall": 0.8235,
+    "f1": 0.827,
+    "mean_iou_tp": 0.7944,
+    "tp": 294,
+    "fp": 60,
+    "gt": 357
+   }
+  },
+  "0.35": {
+   "Longitudinal crack": {
+    "precision": 0.7639,
+    "recall": 0.4455,
+    "f1": 0.5628,
+    "mean_iou_tp": 0.7932,
+    "tp": 1123,
+    "fp": 347,
+    "gt": 2521
+   },
+   "Transverse crack": {
+    "precision": 0.7376,
+    "recall": 0.4222,
+    "f1": 0.537,
+    "mean_iou_tp": 0.7676,
+    "tp": 475,
+    "fp": 169,
+    "gt": 1125
+   },
+   "Alligator crack": {
+    "precision": 0.8018,
+    "recall": 0.4594,
+    "f1": 0.5841,
+    "mean_iou_tp": 0.7884,
+    "tp": 441,
+    "fp": 109,
+    "gt": 960
+   },
+   "Pothole": {
+    "precision": 0.7417,
+    "recall": 0.343,
+    "f1": 0.4691,
+    "mean_iou_tp": 0.7483,
+    "tp": 201,
+    "fp": 70,
+    "gt": 586
+   },
+   "Manhole cover": {
+    "precision": 0.8844,
+    "recall": 0.7927,
+    "f1": 0.836,
+    "mean_iou_tp": 0.7963,
+    "tp": 283,
+    "fp": 37,
+    "gt": 357
+   }
+  },
+  "0.5": {
+   "Longitudinal crack": {
+    "precision": 0.8547,
+    "recall": 0.2987,
+    "f1": 0.4427,
+    "mean_iou_tp": 0.8114,
+    "tp": 753,
+    "fp": 128,
+    "gt": 2521
+   },
+   "Transverse crack": {
+    "precision": 0.8601,
+    "recall": 0.2622,
+    "f1": 0.4019,
+    "mean_iou_tp": 0.7851,
+    "tp": 295,
+    "fp": 48,
+    "gt": 1125
+   },
+   "Alligator crack": {
+    "precision": 0.9029,
+    "recall": 0.3198,
+    "f1": 0.4723,
+    "mean_iou_tp": 0.8065,
+    "tp": 307,
+    "fp": 33,
+    "gt": 960
+   },
+   "Pothole": {
+    "precision": 0.8434,
+    "recall": 0.2389,
+    "f1": 0.3723,
+    "mean_iou_tp": 0.769,
+    "tp": 140,
+    "fp": 26,
+    "gt": 586
+   },
+   "Manhole cover": {
+    "precision": 0.9326,
+    "recall": 0.6975,
+    "f1": 0.7981,
+    "mean_iou_tp": 0.8044,
+    "tp": 249,
+    "fp": 18,
+    "gt": 357
+   }
+  },
+  "0.65": {
+   "Longitudinal crack": {
+    "precision": 0.9106,
+    "recall": 0.1535,
+    "f1": 0.2627,
+    "mean_iou_tp": 0.8334,
+    "tp": 387,
+    "fp": 38,
+    "gt": 2521
+   },
+   "Transverse crack": {
+    "precision": 0.9596,
+    "recall": 0.0844,
+    "f1": 0.1552,
+    "mean_iou_tp": 0.8123,
+    "tp": 95,
+    "fp": 4,
+    "gt": 1125
+   },
+   "Alligator crack": {
+    "precision": 0.9415,
+    "recall": 0.1844,
+    "f1": 0.3084,
+    "mean_iou_tp": 0.8306,
+    "tp": 177,
+    "fp": 11,
+    "gt": 960
+   },
+   "Pothole": {
+    "precision": 0.939,
+    "recall": 0.1314,
+    "f1": 0.2305,
+    "mean_iou_tp": 0.7895,
+    "tp": 77,
+    "fp": 5,
+    "gt": 586
+   },
+   "Manhole cover": {
+    "precision": 0.9877,
+    "recall": 0.451,
+    "f1": 0.6192,
+    "mean_iou_tp": 0.822,
+    "tp": 161,
+    "fp": 2,
+    "gt": 357
+   }
+  }
+ }
+}
