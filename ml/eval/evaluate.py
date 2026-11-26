@@ -7,7 +7,7 @@ Gives, on one split of the prepared dataset:
   true positives at several confidence thresholds (pothole table included)
 
 Matching rule (own metrics): greedy by confidence, same class, IoU >= 0.5,
-each ground truth box matched at most once.
+each ground truth box matched at most once (boxes.greedy_match).
 """
 
 import csv
@@ -17,36 +17,27 @@ from pathlib import Path
 
 import numpy as np
 
+from boxes import greedy_match, read_yolo_labels as read_labels
+
 THRESHOLDS = [0.15, 0.25, 0.35, 0.5, 0.65]
+DUMP_MIN_CONF = 0.01  # boxes below this are not saved in <name>_preds.json
 
 
-def read_labels(lbl_path, w, h):
-    boxes = []
-    p = Path(lbl_path)
-    if p.exists():
-        for line in p.read_text().split("\n"):
-            if not line.strip():
-                continue
-            c, xc, yc, bw, bh = map(float, line.split())
-            boxes.append((int(c), (xc - bw / 2) * w, (yc - bh / 2) * h, (xc + bw / 2) * w, (yc + bh / 2) * h))
-    return boxes
+def dump_entry(det, w, h, gt):
+    """One photo in the saved-predictions format read by analyze_preds.py, error_sheets.py and ensemble.py:
+    det = [[x1, y1, x2, y2, conf, cls], ...] with conf >= DUMP_MIN_CONF, gt = [[cls, x1, y1, x2, y2], ...],
+    pixels of the original photo."""
+    det = np.asarray(det).reshape(-1, 6)
+    return {"w": w, "h": h, "det": np.round(det[det[:, 4] >= DUMP_MIN_CONF], 3).tolist(),
+            "gt": [[g[0]] + [round(float(t), 1) for t in g[1:]] for g in gt]}
 
 
-def iou(a, b):
-    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0]))
-    iy = max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
-    inter = ix * iy
-    u = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
-    return inter / u if u > 0 else 0.0
-
-
-def collect_predictions(model, image_paths, imgsz, batch=32, device=0, augment=False):
+def collect_predictions(model, image_paths, imgsz, batch=32, device=0):
     """Run the model once at conf 0.001 and keep all boxes per image."""
     preds = {}
     for i in range(0, len(image_paths), batch):
         chunk = image_paths[i:i + batch]
-        res = model.predict(chunk, imgsz=imgsz, conf=0.001, iou=0.7, device=device, verbose=False,
-                            augment=augment, max_det=300)
+        res = model.predict(chunk, imgsz=imgsz, conf=0.001, iou=0.7, device=device, verbose=False, max_det=300)
         for p, r in zip(chunk, res):
             h, w = r.orig_shape
             d = r.boxes.data.cpu().numpy() if len(r.boxes) else np.zeros((0, 6))
@@ -55,46 +46,39 @@ def collect_predictions(model, image_paths, imgsz, batch=32, device=0, augment=F
 
 
 def own_metrics(preds, label_dir_of, n_classes, thresholds=THRESHOLDS, iou_thr=0.5):
-    """Per class P, R, F1 and mean IoU of matched boxes at each confidence threshold."""
+    """Per class P, R, F1 and mean IoU of matched boxes at each confidence threshold.
+
+    Each image and class is matched once (at the lowest threshold); counts at higher thresholds are read off
+    that one result, which gives the same answer as matching again at each threshold (see boxes.py).
+    """
+    n_gt = np.zeros(n_classes)
+    conf_c, tp_c, iou_c = defaultdict(list), defaultdict(list), defaultdict(list)
+    t_min = min(thresholds)
+    for p, v in preds.items():
+        gt = np.array(read_labels(label_dir_of(p), v["w"], v["h"]), dtype=float).reshape(-1, 5)
+        d = v["det"]
+        d = d[d[:, 4] >= t_min] if len(d) else np.zeros((0, 6))
+        for c in range(n_classes):
+            g = gt[gt[:, 0] == c, 1:]
+            n_gt[c] += len(g)
+            dc = d[d[:, 5] == c]
+            order, tp, _, best = greedy_match(dc, g, iou_thr)
+            conf_c[c].append(dc[order, 4])
+            tp_c[c].append(tp)
+            iou_c[c].append(best)
     out = {}
-    gts = {p: read_labels(label_dir_of(p), v["w"], v["h"]) for p, v in preds.items()}
     for t in thresholds:
-        tp = np.zeros(n_classes)
-        fp = np.zeros(n_classes)
-        n_gt = np.zeros(n_classes)
-        ious = defaultdict(list)
-        for p, v in preds.items():
-            gt = gts[p]
-            for g in gt:
-                n_gt[g[0]] += 1
-            d = v["det"]
-            d = d[d[:, 4] >= t] if len(d) else d
-            order = np.argsort(-d[:, 4]) if len(d) else []
-            used = set()
-            for k in order:
-                x1, y1, x2, y2, conf, c = d[k]
-                c = int(c)
-                best, bj = 0.0, -1
-                for j, g in enumerate(gt):
-                    if j in used or g[0] != c:
-                        continue
-                    v_iou = iou((x1, y1, x2, y2), g[1:])
-                    if v_iou > best:
-                        best, bj = v_iou, j
-                if best >= iou_thr:
-                    tp[c] += 1
-                    used.add(bj)
-                    ious[c].append(best)
-                else:
-                    fp[c] += 1
         row = {}
         for c in range(n_classes):
-            prec = tp[c] / (tp[c] + fp[c]) if tp[c] + fp[c] else 0.0
-            rec = tp[c] / n_gt[c] if n_gt[c] else 0.0
+            conf, ok, bi = (np.concatenate(x[c]) for x in (conf_c, tp_c, iou_c))
+            sel = conf >= t
+            tp, fp, ious = ok[sel].sum(), (~ok[sel]).sum(), bi[sel & ok]
+            prec = tp / (tp + fp) if tp + fp else 0.0
+            rec = tp / n_gt[c] if n_gt[c] else 0.0
             f1 = 2 * prec * rec / (prec + rec) if prec + rec else 0.0
-            row[c] = {"precision": round(prec, 4), "recall": round(rec, 4), "f1": round(f1, 4),
-                      "mean_iou_tp": round(float(np.mean(ious[c])), 4) if ious[c] else None,
-                      "tp": int(tp[c]), "fp": int(fp[c]), "gt": int(n_gt[c])}
+            row[c] = {"precision": round(float(prec), 4), "recall": round(float(rec), 4), "f1": round(float(f1), 4),
+                      "mean_iou_tp": round(float(np.mean(ious)), 4) if len(ious) else None,
+                      "tp": int(tp), "fp": int(fp), "gt": int(n_gt[c])}
         out[t] = row
     return out
 
@@ -114,14 +98,15 @@ def ultra_val(model, data_yaml, split, imgsz, device=0, batch=32, name="val"):
 
 
 def per_country_val(model, data_root, manifest_csv, split, imgsz, device=0, work_dir="/kaggle/temp/country_lists"):
-    """Run Ultralytics val once per country using image list files."""
+    """Run Ultralytics val once per country using image list files (only images present in images/<split>)."""
     work = Path(work_dir)
     work.mkdir(parents=True, exist_ok=True)
     by_c = defaultdict(list)
     with open(manifest_csv) as f:
         for r in csv.DictReader(f):
-            if r["split"] == split:
-                by_c[r["country"]].append(str(Path(data_root) / "images" / split / f"{r['stem']}.jpg"))
+            p = Path(data_root) / "images" / split / f"{r['stem']}.jpg"
+            if r["split"] == split and p.exists():
+                by_c[r["country"]].append(str(p))
     names = model.names
     out = {}
     for c, imgs in sorted(by_c.items()):
@@ -154,4 +139,10 @@ def full_report(model, data_root, data_yaml, manifest_csv, split, imgsz, out_jso
     om = own_metrics(preds, lbl, len(model.names))
     rep["own_iou50"] = {str(t): {model.names[c]: v for c, v in row.items()} for t, row in om.items()}
     Path(out_json).write_text(json.dumps(rep, indent=1))
+    # Raw predictions and ground truth per image, for offline analysis (analyze_preds.py, error_sheets.py,
+    # ensemble.py): confidence intervals, size slices, false alarms, calibration.
+    dump = {Path(p).stem: dump_entry(v["det"], v["w"], v["h"], read_labels(lbl(p), v["w"], v["h"]))
+            for p, v in preds.items()}
+    out_path = Path(out_json)
+    out_path.with_name(out_path.stem + "_preds.json").write_text(json.dumps(dump))
     return rep

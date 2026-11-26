@@ -20,6 +20,22 @@ before shipping a model trained on it.
   roads. The vehicle and person boxes could help with "encroachment (parked
   vehicles)". Small (3,350 images), so per-class counts need checking. The
   non-commercial licence is fine for a student project but not for a product.
+- Checked in detail on 15 Nov 2026 (downloaded, labels counted, boxes viewed):
+  - Class ids are the names in alphabetical order: 0 auto-rickshaw, 1 bike, 2 bus, 3 car, 4 crack,
+    5 manhole, 6 person, 7 pothole, 8 speed bump, 9 waterlogging. There is no names file.
+  - Only the `video_NN_frame_*` files (24 videos, 1920x1080) are Indian. The 250 `anomaly_vlcsnap-*`
+    files (640x360, orange car bonnet) are Italian roads.
+  - Its val2017 folder is not a real split: all 290 video frames there are byte-identical copies of
+    train2017 files.
+  - Indian pothole frames: 372 frames (579 boxes) from 21 videos after thinning near-copy frames.
+    Many boxes are tiny; label quality varies by video. No overlap with our RDD2022 val/test (dHash check).
+  - Built by `ml/data/prepare_cmird.py` as a train-only add-on (Kaggle private dataset
+    `infrascan-cmird-pothole`), used by e2 (all 21 videos) and e7 (14 videos; 7 held out for scoring) in
+    `ml/kaggle/runs.json`.
+  - Result (EXPERIMENTS.md sec. 6 and 10): no gain on RDD2022 val, but trained on 14 videos it lifts pothole
+    recall on 7 unseen CMIRD videos from 2% to 30%. More footage like this (motorbike, wet, busy streets) is the
+    most promising data to add for Indian roads.
+  - Seen once: one label error (video_23 frame 147, a "pothole" box on a person).
 
 ## Open or unmaintained manholes
 
@@ -81,8 +97,9 @@ Shops encroaching on the road: nothing found.
 | Pothole Image Segmentation (farzadnekouei) | https://www.kaggle.com/datasets/farzadnekouei/pothole-image-segmentation-dataset | about 50 MB | 780 images (720 train = about 240 photos x 3 augmented copies, 60 val), YOLOv8 pothole polygons, stretched to 640x640, plus a sample video | Apache 2.0 |
 | RDD2022 India Pothole D40 | https://www.kaggle.com/datasets/vidishbijalwan/rdd2022-india-pothole-d40 | 84 MB | RDD2022 India subset (same data we already use) | not checked |
 
-Any extra pothole data is judged only on the same RDD2022 val split, so we can
-see if it really helps.
+Any extra pothole data is judged on the same RDD2022 val split, so we can see if it really helps. If the new
+data is a different kind of footage, also hold out some of its videos (never trained on) and score those, as
+in e7: RDD2022 val alone could not show the gain CMIRD gave on motorbike footage.
 
 Note on the farzadnekouei set: it is small and the train images are
 augmented copies (file names like `pic-10-_jpg.rf.<hash>.jpg`), so group by

@@ -26,9 +26,9 @@ from inference import service as inference  # noqa: E402
 from inference.labels import CLASS_LABELS  # noqa: E402
 
 if not Path(inference.DEFAULT_WEIGHT_PATH).is_file():
-    pytest.skip("Shipped v0-mvp weights are missing", allow_module_level=True)
+    pytest.skip("Shipped model weights are missing", allow_module_level=True)
 
-FIXTURE_PATH = Path(__file__).parent / "fixtures" / "v0_mvp_multi_png_output.json"
+FIXTURE_PATH = Path(__file__).parent / "fixtures" / "v1_multi_png_output.json"
 SMOKE_IMAGE = Path(inference.DEFAULT_IMAGE_PATH)
 DETECTION_KEYS = {"class_ids", "label", "classification", "severity", "confidence", "bbox_xyxy"}
 
@@ -69,7 +69,7 @@ def test_real_inference_returns_v0_contract_and_in_memory_evidence() -> None:
 
     assert set(result) == {"image_width", "image_height", "model_name", "model_version", "detections"}
     assert (result["image_width"], result["image_height"]) == (886, 595)
-    assert result["model_version"] == "v0-mvp"
+    assert result["model_version"] == "v1"
     assert result["detections"]
     for detection in result["detections"]:
         assert set(detection) == DETECTION_KEYS
@@ -172,7 +172,7 @@ def test_http_to_celery_worker_to_database_with_real_model(
         database.dispose_engine()
 
     assert job["status"] == "completed"
-    assert job["model_version"] == "v0-mvp"
+    assert job["model_version"] == "v1"
     assert detections["total"] == len(detections["items"]) > 0
     evidence_ids = {d["evidence_media"] for d in detections["items"]}
     assert len(evidence_ids) == 1 and None not in evidence_ids

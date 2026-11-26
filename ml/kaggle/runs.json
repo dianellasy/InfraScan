@@ -1,0 +1,123 @@
+{
+  "_about": "One entry per v1 Kaggle training run. All use ml/kaggle/train/body.py; 'env' overrides its defaults (YOLO11s, imgsz 640, 50 epochs, patience 15, batch 32, seed 42, classes rdd4). Build with: python ml/kaggle/build_kernel.py --run <name>. Results go to ml/reports/<name>/ and ml/EXPERIMENTS.md. b0 (Atul, 11 Nov) predates this file; its record is ml/reports/b0_yolo11s_640/ and its Kaggle notebook.",
+  "_sources": {
+    "data_v1": "adarshjaiswal2234/infrascan-data-v1 (kernel output: India+US RDD2022, leak-free split; built by ml/kaggle/data_v1)",
+    "cmird": "adarshjaiswal2234/infrascan-cmird-pothole (private dataset: 372 Indian pothole frames, train only; built by ml/data/prepare_cmird.py)"
+  },
+  "runs": {
+    "b1_yolo11s_640": {
+      "what": "clean baseline: b0 config on the data_v1 split",
+      "kernel": "adarshjaiswal2234/infrascan-b1-yolo11s-640",
+      "env": {},
+      "sources": [
+        "data_v1"
+      ],
+      "status": "done 14 Nov 2026"
+    },
+    "b1_seed2": {
+      "what": "b1 with seed 2 (run-to-run spread)",
+      "kernel": "adarshjaiswal2234/infrascan-b1-seed2",
+      "env": {
+        "SEED": "2"
+      },
+      "sources": [
+        "data_v1"
+      ],
+      "status": "done 15 Nov 2026"
+    },
+    "b1_seed3": {
+      "what": "b1 with seed 3 (run-to-run spread)",
+      "kernel": "adarshjaiswal2234/infrascan-b1-seed3",
+      "env": {
+        "SEED": "3"
+      },
+      "sources": [
+        "data_v1"
+      ],
+      "status": "done 15 Nov 2026"
+    },
+    "e1_imgsz736": {
+      "what": "image size 736 (India's native 720) for small potholes",
+      "kernel": "adarshjaiswal2234/infrascan-e1-imgsz736",
+      "env": {
+        "IMGSZ": "736"
+      },
+      "sources": [
+        "data_v1"
+      ],
+      "status": "done 15 Nov 2026"
+    },
+    "e3_pothole_only": {
+      "what": "pothole-only model (cracks dropped from labels)",
+      "kernel": "adarshjaiswal2234/infrascan-e3-pothole-only",
+      "env": {
+        "CLASSES": "pothole"
+      },
+      "sources": [
+        "data_v1"
+      ],
+      "status": "done 16 Nov 2026 (worse than b1)"
+    },
+    "e2_cmird_rdd4": {
+      "what": "b1 + CMIRD Indian pothole frames in train (frames that also show cracks skipped)",
+      "kernel": "adarshjaiswal2234/infrascan-e2-cmird-rdd4",
+      "env": {
+        "EXTRA": "cmird"
+      },
+      "sources": [
+        "data_v1",
+        "cmird"
+      ],
+      "status": "done 16 Nov 2026 (same as b1 within noise)"
+    },
+    "e4_yolo26s": {
+      "what": "newer model family, same size: YOLO26s instead of YOLO11s",
+      "kernel": "adarshjaiswal2234/infrascan-e4-yolo26s",
+      "env": {
+        "MODEL": "yolo26s.pt"
+      },
+      "sources": [
+        "data_v1"
+      ],
+      "status": "done 16 Nov 2026 (re-pushed with cache off after a RAM kill; 128 min). Beats all 3 b1 seeds on pothole AP50"
+    },
+    "e6_epochs100": {
+      "what": "b1 trained for 100 epochs instead of 50 (b1 was still improving at epoch 48-49); also the first run with the faster loader settings, so its seconds per epoch compare directly with b1's 120 s",
+      "kernel": "adarshjaiswal2234/infrascan-e6-epochs100",
+      "env": {
+        "EPOCHS": "100",
+        "PATIENCE": "30"
+      },
+      "sources": [
+        "data_v1"
+      ],
+      "status": "ready"
+    },
+    "e5_yolo11m": {
+      "what": "bigger model: YOLO11m instead of YOLO11s (batch 16 to fit T4 memory)",
+      "kernel": "adarshjaiswal2234/infrascan-e5-yolo11m",
+      "env": {
+        "MODEL": "yolo11m.pt",
+        "BATCH": "16"
+      },
+      "sources": [
+        "data_v1"
+      ],
+      "status": "ready"
+    },
+    "e7_yolo26s_cmird_holdout": {
+      "what": "e4 (YOLO26s) + CMIRD Indian motorbike frames in train, 7 CMIRD videos held out (every 3rd video by frame count, from the 2nd largest) to score on footage like real use. Compare with e4 on the same held-out frames",
+      "kernel": "adarshjaiswal2234/infrascan-e7-yolo26s-cmird-holdout",
+      "env": {
+        "MODEL": "yolo26s.pt",
+        "EXTRA": "cmird",
+        "CMIRD_HOLDOUT": "video_02,video_04,video_05,video_11,video_12,video_20,video_21"
+      },
+      "sources": [
+        "data_v1",
+        "cmird"
+      ],
+      "status": "done 18 Nov 2026 (2.05 h). Held-out videos: pothole AP50 0.08 -> 0.23 vs e4; RDD val same as e4 within noise"
+    }
+  }
+}

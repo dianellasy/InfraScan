@@ -18,3 +18,5 @@ node_modules/
 **/.venv/
 __pycache__/
 .vercel/
+ml/kaggle/_build/
+ml/.pytest_cache/

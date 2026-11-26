@@ -1,0 +1,7 @@
+# ML tooling (data prep, evaluation, tests). Training itself runs on Kaggle, where the kernels
+# install the same pinned Ultralytics version.
+ultralytics==8.4.210
+numpy
+pillow
+pytest
+kaggle
