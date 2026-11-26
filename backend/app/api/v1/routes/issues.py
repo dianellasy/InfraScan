@@ -134,12 +134,20 @@ async def list_issue_detections(
 @router.patch(
     "/{issue_id}",
     response_model=IssueDTO,
-    description="Developer and municipal administrator only.",
+    description=(
+        "Developer and municipal administrator only. Records who reviewed the "
+        "Issue and when; accepting, resolving or dismissing it clears its review flag."
+    ),
 )
 async def update_issue(
     issue_id: UUID,
     update: IssueUpdate,
-    _user: PrivilegedUser,
+    user: PrivilegedUser,
+    access: CurrentJobAccess,
     service: Annotated[InfraScanService, Depends(get_service)],
-) -> IssueDTO:
-    return await service.update_issue(issue_id, update)
+) -> IssueDTO | JSONResponse:
+    """Record a review decision: status, severity and/or a reviewer note."""
+    try:
+        return await service.update_issue(issue_id, update, user.id, access)
+    except IssueNotFoundError:
+        return _issue_not_found()

@@ -24,7 +24,7 @@ from postgres_support import run_alembic as _run_alembic
 
 REPO_ROOT = BACKEND_DIR.parent
 ALEMBIC_INI = BACKEND_DIR / "alembic.ini"
-HEAD_REVISION = "e5a7c9d14263"
+HEAD_REVISION = "f6b8d0e2a374"
 
 
 def _load_alembic_runtime():
@@ -272,6 +272,9 @@ def test_alembic_renders_upgrade_and_downgrade_sql_offline() -> None:
     assert "ck_evidence_media_data_or_object_storage_key" in sql
     assert "data IS NOT NULL OR object_storage_key IS NOT NULL" in sql
     assert "CREATE INDEX ix_inference_jobs_user_id ON inference_jobs (user_id)" in sql
+    assert "ALTER TABLE issues ADD COLUMN review_note TEXT" in sql
+    assert "ALTER TABLE issues ADD COLUMN reviewed_by UUID" in sql
+    assert "ALTER TABLE issues ADD COLUMN reviewed_at TIMESTAMP WITH TIME ZONE" in sql
     assert "auth.users" not in sql
 
     downgrade = _run_alembic(

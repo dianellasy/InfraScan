@@ -272,7 +272,7 @@ def test_global_operations_are_forbidden_to_owner_scoped_roles(
 def test_global_operations_reach_the_service_for_privileged_roles(
     client: TestClient, role: str
 ) -> None:
-    response = client.get("/api/v1/detections", headers=auth_headers(ADMIN, role=role))
+    response = client.get("/api/v1/analytics/overview", headers=auth_headers(ADMIN, role=role))
     assert response.status_code == 501
 
 

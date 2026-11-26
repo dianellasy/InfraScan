@@ -19,7 +19,7 @@ def evidence_path(media_id: UUID | None) -> str | None:
     return f"{EVIDENCE_PATH_PREFIX}/{media_id}" if media_id is not None else None
 
 
-def detection_to_dto(record: DetectionRecord) -> DetectionDTO:
+def detection_to_dto(record: DetectionRecord, issue_status: str | None = None) -> DetectionDTO:
     location = (
         DetectionLocation.model_validate(record.location)
         if record.location is not None
@@ -37,6 +37,7 @@ def detection_to_dto(record: DetectionRecord) -> DetectionDTO:
         detected_at=utc(record.detected_at),
         observed_at=utc(record.observed_at),
         issue_id=record.issue_id,
+        issue_status=issue_status,
         issue_type=record.issue_type,
         predicted_issue_type_code=predicted_type.value if predicted_type else None,
         evidence_media=record.evidence_media,
@@ -73,4 +74,6 @@ def issue_to_dto(row: IssueRow) -> IssueDTO:
         longitude=row.issue.longitude,
         created_at=utc(row.issue.created_at),
         updated_at=utc(row.issue.updated_at),
+        review_note=row.issue.review_note,
+        reviewed_at=utc(row.issue.reviewed_at),
     )

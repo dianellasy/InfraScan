@@ -49,6 +49,10 @@ class UploadTooLargeError(ValueError):
         self.size_bytes = size_bytes
 
 
+class DetectionNotFoundError(LookupError):
+    """No detection exists for the requested detection ID."""
+
+
 class JobNotFoundError(LookupError):
     """No inference job the caller may access exists for the requested job ID."""
 
@@ -147,7 +151,11 @@ class InfraScanService(Protocol):
 
     async def create_issue(self, issue: IssueCreate) -> IssueDTO: ...
 
-    async def update_issue(self, issue_id: UUID, update: IssueUpdate) -> IssueDTO: ...
+    async def update_issue(
+        self, issue_id: UUID, update: IssueUpdate, reviewer_id: UUID, access: JobAccess
+    ) -> IssueDTO:
+        """Record a reviewer's decision; raises IssueNotFoundError."""
+        ...
 
     async def list_review_queue(
         self, page: int, page_size: int, access: JobAccess
@@ -201,7 +209,9 @@ class InfraScanService(Protocol):
         max_longitude: float | None,
     ) -> Page[DetectionDTO]: ...
 
-    async def get_detection(self, detection_id: UUID) -> DetectionDTO: ...
+    async def get_detection(self, detection_id: UUID) -> DetectionDTO:
+        """Raises DetectionNotFoundError."""
+        ...
 
     async def get_detection_evidence(
         self, detection_id: UUID

@@ -19,9 +19,11 @@ from app.adapters.ports import (
     MediaStorageAdapter,
 )
 from app.authorization import JobAccess
-from app.models import InferenceJob
+from app.models import InferenceJob, Issue, IssueStatus
 from app.repositories import (
+    DetectionFilters,
     DetectionRecordRepository,
+    DetectionRegisterRepository,
     InferenceJobRepository,
     InputMediaRepository,
 )
@@ -36,10 +38,12 @@ from app.schemas import (
     IssueDTO,
     IssueFeatureCollection,
     IssueFilters,
+    IssueUpdate,
     Page,
     ResolvedVideoSubmission,
 )
 from app.services.contracts import (
+    DetectionNotFoundError,
     EvidenceNotFoundError,
     IssueNotFoundError,
     JobNotFoundError,
@@ -51,6 +55,7 @@ from app.services.contracts import (
 from app.services.dto import detection_to_dto
 from app.services.issues import EvidenceImage, IssueQueries
 from app.services.object_keys import direct_upload_key, input_media_key
+from inference.labels import CLASS_LABELS
 
 # A signed upload URL is valid this long; the browser starts the PUT at once.
 DIRECT_UPLOAD_URL_TTL_SECONDS = 15 * 60
@@ -399,14 +404,104 @@ class DatabaseInfraScanService:
             raise EvidenceNotFoundError(media_id)
         return image
 
+    # --- Review and the detection register (privileged routes) -------------------
+
+    async def update_issue(
+        self, issue_id: UUID, update: IssueUpdate, reviewer_id: UUID, access: JobAccess
+    ) -> IssueDTO:
+        found = await run_in_threadpool(self._update_issue, issue_id, update, reviewer_id)
+        if not found:
+            raise IssueNotFoundError(issue_id)
+        issue = await run_in_threadpool(self._issues.get, issue_id, access)
+        if issue is None:
+            raise IssueNotFoundError(issue_id)
+        return issue
+
+    def _update_issue(self, issue_id: UUID, update: IssueUpdate, reviewer_id: UUID) -> bool:
+        with self._session_factory() as session, session.begin():
+            issue = session.get(Issue, issue_id, with_for_update=True)
+            if issue is None:
+                return False
+            if update.severity is not None:
+                issue.severity = update.severity.value
+            if update.review_note is not None:
+                issue.review_note = update.review_note.strip() or None
+            if update.status is not None:
+                issue.status = update.status.value
+                # A human decision settles whatever flagged it for review;
+                # reopening it puts it back in the queue as pending.
+                if update.status != IssueStatus.PENDING_REVIEW:
+                    issue.review_reason = None
+            issue.reviewed_by = reviewer_id
+            issue.reviewed_at = datetime.now(UTC)
+        return True
+
+    async def list_detections(
+        self,
+        page: int,
+        page_size: int,
+        classification: str | None,
+        severity: str | None,
+        confidence_min: float | None,
+        confidence_max: float | None,
+        detected_after: datetime | None,
+        detected_before: datetime | None,
+        min_latitude: float | None,
+        min_longitude: float | None,
+        max_latitude: float | None,
+        max_longitude: float | None,
+    ) -> Page[DetectionDTO]:
+        class_id = None
+        if classification is not None:
+            # Labels are what the API shows; an unknown label matches nothing.
+            class_id = next(
+                (
+                    cid
+                    for cid, label in CLASS_LABELS.items()
+                    if label.lower() == classification.lower()
+                ),
+                -1,
+            )
+        filters = DetectionFilters(
+            class_id=class_id,
+            severity=severity,
+            confidence_min=confidence_min,
+            confidence_max=confidence_max,
+            detected_after=detected_after,
+            detected_before=detected_before,
+            min_latitude=min_latitude,
+            min_longitude=min_longitude,
+            max_latitude=max_latitude,
+            max_longitude=max_longitude,
+        )
+        return await run_in_threadpool(self._list_detections, filters, page, page_size)
+
+    def _list_detections(
+        self, filters: DetectionFilters, page: int, page_size: int
+    ) -> Page[DetectionDTO]:
+        with self._session_factory() as session:
+            rows, total = DetectionRegisterRepository(session).list(
+                filters, offset=(page - 1) * page_size, limit=page_size
+            )
+            items = [detection_to_dto(record, status) for record, status in rows]
+        return Page[DetectionDTO](items=items, total=total, page=page, page_size=page_size)
+
+    async def get_detection(self, detection_id: UUID) -> DetectionDTO:
+        detection = await run_in_threadpool(self._get_detection, detection_id)
+        if detection is None:
+            raise DetectionNotFoundError(detection_id)
+        return detection
+
+    def _get_detection(self, detection_id: UUID) -> DetectionDTO | None:
+        with self._session_factory() as session:
+            row = DetectionRegisterRepository(session).get(detection_id)
+            return detection_to_dto(*row) if row is not None else None
+
     # Not part of the inference MVP; the API maps these to 501 Not Implemented.
     async def list_jobs(self, *args: Any, **kwargs: Any) -> NoReturn:
         raise NotImplementedError
 
     async def create_issue(self, *args: Any, **kwargs: Any) -> NoReturn:
-        raise NotImplementedError
-
-    async def update_issue(self, *args: Any, **kwargs: Any) -> NoReturn:
         raise NotImplementedError
 
     async def list_roads(self, *args: Any, **kwargs: Any) -> NoReturn:
@@ -416,12 +511,6 @@ class DatabaseInfraScanService:
         raise NotImplementedError
 
     async def list_road_issues(self, *args: Any, **kwargs: Any) -> NoReturn:
-        raise NotImplementedError
-
-    async def list_detections(self, *args: Any, **kwargs: Any) -> NoReturn:
-        raise NotImplementedError
-
-    async def get_detection(self, *args: Any, **kwargs: Any) -> NoReturn:
         raise NotImplementedError
 
     async def get_detection_evidence(self, *args: Any, **kwargs: Any) -> NoReturn:

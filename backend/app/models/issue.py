@@ -14,6 +14,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     Uuid,
     func,
     text,
@@ -134,6 +135,12 @@ class Issue(Base):
     latitude: Mapped[float | None] = mapped_column(Double(), nullable=True)
     longitude: Mapped[float | None] = mapped_column(Double(), nullable=True)
     location_accuracy_m: Mapped[float | None] = mapped_column(Double(), nullable=True)
+    # Human review decision (PATCH /api/v1/issues/{issue_id}).
+    review_note: Mapped[str | None] = mapped_column(Text(), nullable=True)
+    reviewed_by: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     first_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

@@ -150,7 +150,8 @@ def test_class_labels_match_training_class_order() -> None:
     prepare = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(prepare)
 
-    assert CLASS_LABELS == dict(enumerate(prepare.CLASS_NAMES))
+    # The shipped model is trained on the "rdd4" class set.
+    assert CLASS_LABELS == dict(enumerate(name for _, name in prepare.CLASS_SETS["rdd4"]))
     assert CLASS_LABELS == {
         0: "Longitudinal crack",
         1: "Transverse crack",

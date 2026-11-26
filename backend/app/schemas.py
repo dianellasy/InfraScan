@@ -168,12 +168,25 @@ class IssueCreate(BaseModel):
 
 
 class IssueUpdate(BaseModel):
+    """A reviewer's decision on an Issue. Omitted fields stay unchanged."""
+
     model_config = ConfigDict(extra="forbid")
 
-    title: str | None = Field(default=None, min_length=1, max_length=255)
-    description: str | None = None
-    status: str | None = None
-    severity: str | None = None
+    status: IssueStatus | None = Field(
+        default=None,
+        description=(
+            "accepted (a real issue), dismissed (not a real issue), resolved "
+            "(repaired), or pending_review to reopen it."
+        ),
+    )
+    severity: DetectionSeverity | None = None
+    review_note: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def require_a_change(self) -> Self:
+        if self.status is None and self.severity is None and self.review_note is None:
+            raise ValueError("Set at least one of status, severity or review_note")
+        return self
 
 
 Latitude = Annotated[float, Field(ge=-90, le=90)]
@@ -306,6 +319,8 @@ class IssueDTO(IssueSummaryFields):
     longitude: Longitude | None = None
     created_at: datetime
     updated_at: datetime
+    review_note: str | None = None
+    reviewed_at: datetime | None = None
 
 
 class PointGeometry(BaseModel):
@@ -371,6 +386,10 @@ class DetectionDTO(BaseModel):
             "The canonical Issue this detection supports; NULL for an unmapped "
             "model class or a historical row that has not been backfilled."
         ),
+    )
+    issue_status: str | None = Field(
+        default=None,
+        description="Review status of the Issue this detection supports, when it has one.",
     )
     # Raw v0-mvp model class ID as predicted, not a canonical issue type.
     issue_type: int | None = None
