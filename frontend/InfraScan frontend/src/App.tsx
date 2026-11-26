@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { endpoints } from "./api/endpoints.ts";
+import { uploadAndSubmit, type UploadStage } from "./api/directUpload.ts";
 import { request } from "./api/request.ts";
 import { fetchJobIssues } from "./issues/api.ts";
 import { reviewReasonLabel, severityInfo, statusLabel } from "./issues/constants.ts";
@@ -74,6 +75,7 @@ function App({ jobId }: { jobId?: string }) {
   const [detectionTotal, setDetectionTotal] = useState(0);
   const [jobIssues, setJobIssues] = useState<Page<Issue> | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [uploadStage, setUploadStage] = useState<UploadStage | null>(null);
   const [loadingDetections, setLoadingDetections] = useState(false);
   const [error, setError] = useState("");
   const activeJobId = job?.job_id;
@@ -195,15 +197,13 @@ function App({ jobId }: { jobId?: string }) {
     setDetectionTotal(0);
     setJobIssues(null);
 
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("metadata", JSON.stringify(metadata));
-
     try {
-      const acceptedJob = await request<Job>(endpoints.inferenceJobs.url, {
-        method: endpoints.inferenceJobs.method,
-        body: formData,
-      });
+      const acceptedJob = await uploadAndSubmit<Job>(
+        file,
+        isVideoFile(file) ? "video/mp4" : "image/jpeg",
+        metadata,
+        setUploadStage,
+      );
       setJob(acceptedJob);
       // A job link keeps the results reachable after visiting the map or an Issue.
       window.location.hash = jobHref(acceptedJob.job_id);
@@ -213,6 +213,7 @@ function App({ jobId }: { jobId?: string }) {
       );
     } finally {
       setSubmitting(false);
+      setUploadStage(null);
     }
   }
 
@@ -360,7 +361,11 @@ function App({ jobId }: { jobId?: string }) {
             )}
 
             <button className="primary-button" type="submit" disabled={submitting}>
-              {submitting ? "Submitting…" : "Submit for analysis"}
+              {!submitting
+                ? "Submit for analysis"
+                : uploadStage === "starting"
+                  ? "Starting analysis…"
+                  : "Uploading…"}
             </button>
           </form>
         </section>

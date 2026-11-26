@@ -9,8 +9,22 @@ import { browserUtcOffset, formatUtcOffset } from "./utcOffset.ts";
 
 const accepted = { job_id: "job-1", status: "pending", submitted_at: "2026-11-20T20:30:00Z" };
 
+const ticket = {
+  upload_id: "upload-1",
+  upload_url: "https://r2.example/input/user/upload-1.jpg?signature=test",
+  method: "PUT",
+  headers: { "Content-Type": "image/jpeg" },
+  expires_in_seconds: 900,
+};
+
+/** Answers the upload ticket and the storage PUT; API calls after that get `responses` in order. */
 function stubSubmission(...responses: Response[]) {
-  const fetchMock = vi.fn(async () => responses.shift() ?? jsonResponse(accepted));
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    if (url.pathname === "/api/v1/inference/uploads") return jsonResponse(ticket, 201);
+    if (url.hostname === "r2.example") return new Response(null, { status: 200 });
+    return responses.shift() ?? jsonResponse(accepted);
+  });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
@@ -19,9 +33,19 @@ function chooser(): HTMLInputElement {
   return document.querySelector('input[type="file"]') as HTMLInputElement;
 }
 
+function callTo(fetchMock: ReturnType<typeof vi.fn>, matches: (url: URL) => boolean) {
+  return (fetchMock.mock.calls as unknown as [string, RequestInit][]).find(([input]) =>
+    matches(new URL(String(input))),
+  );
+}
+
+function submittedJob(fetchMock: ReturnType<typeof vi.fn>): Record<string, unknown> {
+  const call = callTo(fetchMock, (url) => url.pathname === "/api/v1/inference/jobs")!;
+  return JSON.parse(String(call[1].body)) as Record<string, unknown>;
+}
+
 function submittedMetadata(fetchMock: ReturnType<typeof vi.fn>): unknown {
-  const body = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body as FormData;
-  return JSON.parse(String(body.get("metadata")));
+  return submittedJob(fetchMock).metadata;
 }
 
 describe("upload form", () => {
@@ -44,8 +68,53 @@ describe("upload form", () => {
     await user.type(screen.getByLabelText("Longitude"), "-117.8851");
     await user.click(screen.getByRole("button", { name: "Submit for analysis" }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(callTo(fetchMock, (url) => url.pathname === "/api/v1/inference/jobs")).toBeDefined());
     expect(submittedMetadata(fetchMock)).toMatchObject({ latitude: 33.8823, longitude: -117.8851 });
+  });
+
+  it("uploads the file straight to storage, then starts the job by upload ID", async () => {
+    const user = userEvent.setup();
+    const fetchMock = stubSubmission();
+    render(<App />);
+    const photo = new File(["jpeg-bytes"], "road.jpg", { type: "image/jpeg" });
+    await user.upload(chooser(), photo);
+    await user.type(screen.getByLabelText("Capture date and time"), "2026-11-10T14:30");
+    await user.type(screen.getByLabelText("Latitude"), "33.8823");
+    await user.type(screen.getByLabelText("Longitude"), "-117.8851");
+    await user.click(screen.getByRole("button", { name: "Submit for analysis" }));
+    await waitFor(() => expect(window.location.hash).toBe("#/jobs/job-1"));
+
+    const paths = (fetchMock.mock.calls as unknown as [string][]).map(([input]) => new URL(String(input)));
+    expect(paths.slice(0, 3).map((url) => url.hostname === "r2.example" ? "storage" : url.pathname)).toEqual([
+      "/api/v1/inference/uploads", "storage", "/api/v1/inference/jobs",
+    ]);
+    const ticketRequest = callTo(fetchMock, (url) => url.pathname === "/api/v1/inference/uploads")!;
+    expect(JSON.parse(String(ticketRequest[1].body))).toEqual({ content_type: "image/jpeg", size_bytes: photo.size });
+    const put = callTo(fetchMock, (url) => url.hostname === "r2.example")!;
+    expect(put[0]).toBe(ticket.upload_url);
+    expect(put[1].method).toBe("PUT");
+    expect(put[1].body).toBe(photo);
+    // The signed URL is the credential; the user's token never goes to storage.
+    expect(new Headers(put[1].headers).get("Authorization")).toBeNull();
+    expect(new Headers(put[1].headers).get("Content-Type")).toBe("image/jpeg");
+    expect(submittedJob(fetchMock)).toMatchObject({
+      upload_id: "upload-1", content_type: "image/jpeg", filename: "road.jpg",
+    });
+  });
+
+  it("reports a failed storage upload without starting a job", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/api/v1/inference/uploads") return jsonResponse(ticket, 201);
+      return new Response("denied", { status: 403 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+    await user.upload(chooser(), new File(["mp4"], "clip.mp4", { type: "video/mp4" }));
+    await user.click(screen.getByRole("button", { name: "Submit for analysis" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Upload to storage failed (403)");
+    expect(callTo(fetchMock, (url) => url.pathname === "/api/v1/inference/jobs")).toBeUndefined();
   });
 
   it("uses embedded GPS and the camera offset for MP4", async () => {
@@ -67,8 +136,9 @@ describe("upload form", () => {
 
     await user.selectOptions(screen.getByLabelText("Dashcam time-zone setting"), "UTC−08:00");
     await user.click(screen.getByRole("button", { name: "Submit for analysis" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(callTo(fetchMock, (url) => url.pathname === "/api/v1/inference/jobs")).toBeDefined());
     expect(submittedMetadata(fetchMock)).toEqual({ camera_utc_offset_minutes: -480 });
+    expect(submittedJob(fetchMock).content_type).toBe("video/mp4");
   });
 
   it("rejects an MP4 over 1 GB before uploading", async () => {
@@ -153,6 +223,8 @@ describe("job results and issues", () => {
 
   function completedJobServer(issues = [locatedIssue, unlocatedIssue]) {
     return stubFetch((url) => {
+      if (url.pathname === "/api/v1/inference/uploads") return jsonResponse(ticket, 201);
+      if (url.hostname === "r2.example") return new Response(null, { status: 200 });
       if (url.pathname === "/api/v1/inference/jobs") return jsonResponse(accepted, 202);
       if (url.pathname === "/api/v1/jobs/job-1") return jsonResponse({ ...accepted, status: "completed" });
       if (url.pathname === "/api/v1/jobs/job-1/detections") {

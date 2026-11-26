@@ -3,7 +3,7 @@
 Road Infrastructure Issue Detection System
 
 Current Phase:
-	- Architectural Design and Planning
+	- MVP. Deployment to Vercel: see [DEPLOYMENT.md](DEPLOYMENT.md)
 
 ## Branching
 

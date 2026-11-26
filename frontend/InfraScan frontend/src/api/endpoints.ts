@@ -19,6 +19,7 @@ export function apiUrl(path: string): string {
 }
 
 export const endpoints = {
+  inferenceUploads: endpoint("POST", "/api/v1/inference/uploads"),
   inferenceJobs: endpoint("POST", "/api/v1/inference/jobs"),
   issues: endpoint("GET", "/api/v1/issues"),
   issueMap: endpoint("GET", "/api/v1/issues/map"),
