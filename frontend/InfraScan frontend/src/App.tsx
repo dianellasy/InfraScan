@@ -2,12 +2,14 @@ import { useEffect, useState, type FormEvent } from "react";
 import { endpoints } from "./api/endpoints.ts";
 import { uploadAndSubmit, type UploadStage } from "./api/directUpload.ts";
 import { request } from "./api/request.ts";
+import { EvidenceImage } from "./issues/EvidenceImage.tsx";
 import { fetchJobIssues } from "./issues/api.ts";
 import { reviewReasonLabel, severityInfo, statusLabel } from "./issues/constants.ts";
 import type { Issue } from "./issues/types.ts";
 import { focusBounds, issueHref, jobHref, mapHref } from "./routing.ts";
 import { TopBar } from "./TopBar.tsx";
 import { UTC_OFFSET_OPTIONS, browserUtcOffset, formatUtcOffset } from "./utcOffset.ts";
+import { readPhotoMetadata, toDateTimeLocal } from "./photoMetadata.ts";
 import "./App.css";
 
 type Job = {
@@ -30,7 +32,29 @@ type Detection = {
   observed_at?: string | null;
   frame_timestamp?: number | null;
   issue_id?: string | null;
+  /** Annotated evidence image (served by `/api/v1/evidence/<id>`). */
+  evidence_media?: string | null;
 };
+
+/** Unique evidence images in detection order (one per photo, one per video frame). */
+function evidenceIds(detections: Detection[], limit = 6): string[] {
+  const ids: string[] = [];
+  for (const detection of detections) {
+    const id = detection.evidence_media;
+    if (id && !ids.includes(id)) ids.push(id);
+    if (ids.length >= limit) break;
+  }
+  return ids;
+}
+
+/** "3 × Pothole, 1 × Alligator crack" style summary, most frequent first. */
+function classSummary(detections: Detection[]): Array<[string, number]> {
+  const counts = new Map<string, number>();
+  for (const detection of detections) {
+    counts.set(detection.classification, (counts.get(detection.classification) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]);
+}
 
 type Page<T> = {
   items: T[];
@@ -78,7 +102,52 @@ function App({ jobId }: { jobId?: string }) {
   const [uploadStage, setUploadStage] = useState<UploadStage | null>(null);
   const [loadingDetections, setLoadingDetections] = useState(false);
   const [error, setError] = useState("");
+  const [metadataNote, setMetadataNote] = useState("");
+  const [locating, setLocating] = useState(false);
   const activeJobId = job?.job_id;
+
+  /** Fill capture time and GPS from the photo's EXIF, when it has them. */
+  async function fillFromPhoto(selectedFile: File) {
+    setMetadataNote("");
+    if (isVideoFile(selectedFile)) return;
+    const meta = await readPhotoMetadata(selectedFile);
+    const found: string[] = [];
+    if (meta.capturedAt) {
+      setCapturedAt(meta.capturedAt);
+      found.push("capture time");
+    }
+    if (meta.latitude !== undefined && meta.longitude !== undefined) {
+      setLatitude(meta.latitude.toFixed(6));
+      setLongitude(meta.longitude.toFixed(6));
+      found.push("GPS location");
+    }
+    setMetadataNote(
+      found.length
+        ? `Filled ${found.join(" and ")} from the photo. Check before submitting.`
+        : "This photo has no capture time or GPS. Enter them below or use your current location.",
+    );
+  }
+
+  function useCurrentLocation() {
+    if (!navigator.geolocation) {
+      setError("This browser can't share its location. Enter the coordinates instead.");
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLatitude(position.coords.latitude.toFixed(6));
+        setLongitude(position.coords.longitude.toFixed(6));
+        if (!capturedAt) setCapturedAt(toDateTimeLocal(new Date()));
+        setLocating(false);
+      },
+      () => {
+        setError("Couldn't get your location. Enter the coordinates instead.");
+        setLocating(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
+  }
   const videoSelected = file !== null && isVideoFile(file);
 
   useEffect(() => {
@@ -274,6 +343,7 @@ function App({ jobId }: { jobId?: string }) {
                   }
                   setFile(selectedFile);
                   setError("");
+                  if (selectedFile) void fillFromPhoto(selectedFile);
                 }}
               />
             </label>
@@ -320,6 +390,11 @@ function App({ jobId }: { jobId?: string }) {
               </div>
             ) : (
               <div className="metadata-fields">
+                {metadataNote && (
+                  <p className="field-hint" role="status">
+                    {metadataNote}
+                  </p>
+                )}
                 <div className="field-grid">
                   <label>
                     Capture date and time
@@ -357,6 +432,14 @@ function App({ jobId }: { jobId?: string }) {
                     />
                   </label>
                 </div>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={useCurrentLocation}
+                  disabled={locating}
+                >
+                  {locating ? "Getting location…" : "Use my current location"}
+                </button>
               </div>
             )}
 
@@ -410,6 +493,37 @@ function App({ jobId }: { jobId?: string }) {
           )}
         </section>
       </div>
+
+      {job && isSuccessful(job.status) && detections.length > 0 && (
+        <section className="panel results-panel" aria-labelledby="annotated-heading">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">MODEL OUTPUT</p>
+              <h2 id="annotated-heading">Annotated image</h2>
+            </div>
+            <span className="result-count">
+              {detectionTotal} {detectionTotal === 1 ? "detection" : "detections"}
+            </span>
+          </div>
+          <div className="class-summary">
+            {classSummary(detections).map(([label, count]) => (
+              <span key={label} className="class-chip">
+                {count} × {label}
+              </span>
+            ))}
+          </div>
+          <div className="annotated-grid">
+            {evidenceIds(detections).map((id) => (
+              <EvidenceImage
+                key={id}
+                path={`/api/v1/evidence/${id}`}
+                alt="Road image with the model's detection boxes drawn on it"
+                className="annotated-image"
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       {job && isSuccessful(job.status) && jobIssues && (
         <section className="panel results-panel" aria-labelledby="job-issues-heading">

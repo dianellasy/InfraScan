@@ -733,6 +733,56 @@ footer {
   outline: 3px solid #255da7;
   outline-offset: 2px;
 }
+.secondary-button {
+  border: 1px solid #c7d2df;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1f3b5c;
+  padding: 10px 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.secondary-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.metadata-fields .secondary-button {
+  margin-top: 12px;
+}
+
+.class-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.class-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #eef3fb;
+  color: #1f4f96;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.annotated-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.annotated-image {
+  display: block;
+  width: 100%;
+  max-height: 520px;
+  object-fit: contain;
+  border-radius: 10px;
+  background: #0f172a;
+}
+
 /*========== OVERVIEW ==========*/
 
 .overview-page {

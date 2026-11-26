@@ -117,7 +117,9 @@ describe("from a completed job to the issue map and detail", () => {
     // with the bearer token and shown from an object URL.
     const panel = screen.getByRole("complementary", { name: "Selected issue" });
     expect((await within(panel).findByRole("img")).getAttribute("src")).toMatch(/^blob:/);
+    // Fetched once for the job page's annotated image and once for the map panel.
     expect(authorizationFor(fetchMock, "/api/v1/evidence/evidence-uploaded")).toEqual([
+      "Bearer token-a",
       "Bearer token-a",
     ]);
 
