@@ -301,3 +301,50 @@ def test_unconfigured_storage_makes_direct_uploads_unavailable(session_factory) 
 
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "SUBMISSION_DEPENDENCY_UNAVAILABLE"
+
+
+# --- Vercel path: the job is processed in the API after the response ---
+
+
+class AsyncQueue:
+    """Like WaitUntilInferenceQueue: scheduled on the event loop, run later."""
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self.scheduled: list[UUID] = []
+        self.error = error
+
+    async def enqueue_async(self, job_id: UUID) -> None:
+        if self.error is not None:
+            raise self.error
+        self.scheduled.append(job_id)
+
+
+def test_async_queue_receives_the_committed_job(session_factory, storage) -> None:
+    queue = AsyncQueue()
+    app = FastAPI()
+    app.state.infrascan_service = DatabaseInfraScanService(session_factory, queue, storage)
+    register_exception_handlers(app)
+    app.include_router(api_router, prefix="/api/v1")
+    with client_for(app) as client:
+        upload_id, _ = upload(client, storage, make_jpeg())
+        response = submit_upload(client, upload_id)
+
+    assert response.status_code == 202
+    assert queue.scheduled == [UUID(response.json()["job_id"])]
+
+
+def test_scheduling_failure_marks_the_job_failed(session_factory, storage) -> None:
+    app = FastAPI()
+    app.state.infrascan_service = DatabaseInfraScanService(
+        session_factory, AsyncQueue(RuntimeError("no context")), storage
+    )
+    register_exception_handlers(app)
+    app.include_router(api_router, prefix="/api/v1")
+    with client_for(app) as client:
+        upload_id, _ = upload(client, storage, make_jpeg())
+        response = submit_upload(client, upload_id)
+
+    assert response.status_code == 503
+    with session_factory() as session:
+        (status,) = session.execute(sa.select(InferenceJob.status)).one()
+    assert status == "failed"

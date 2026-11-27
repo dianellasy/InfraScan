@@ -1,0 +1,5 @@
+# Local secrets and Vercel link files; settings come from the Vercel project.
+.env*
+!.env.example
+.vercel/
+node_modules/

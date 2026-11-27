@@ -8,3 +8,7 @@ inference/data/
 scripts/check_onnx_parity.py
 Dockerfile
 inference/Dockerfile
+
+# Local secrets and Vercel link files; settings come from the Vercel project.
+.env*
+.vercel/

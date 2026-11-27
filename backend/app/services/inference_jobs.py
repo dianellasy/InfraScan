@@ -140,7 +140,7 @@ class DatabaseInfraScanService:
             metadata,
             user_id,
         )
-        await run_in_threadpool(self._publish, accepted.job_id)
+        await self._publish_job(accepted.job_id)
         return accepted
 
     # --- Direct browser uploads -------------------------------------------------
@@ -246,7 +246,7 @@ class DatabaseInfraScanService:
             metadata,
             user_id,
         )
-        await run_in_threadpool(self._publish, accepted.job_id)
+        await self._publish_job(accepted.job_id)
         return accepted
 
     def _upload(
@@ -303,6 +303,23 @@ class DatabaseInfraScanService:
             self._delete_object(key)
             raise
         return accepted
+
+    async def _publish_job(self, job_id: UUID) -> None:
+        """Hand a committed job to the queue adapter.
+
+        Adapters with `enqueue_async` (in-process processing on Vercel) are
+        called on the event loop; blocking ones (Celery) in the thread pool.
+        """
+        enqueue_async = getattr(self._queue, "enqueue_async", None)
+        if enqueue_async is None:
+            await run_in_threadpool(self._publish, job_id)
+            return
+        try:
+            await enqueue_async(job_id)
+        except Exception as exc:
+            logger.exception("Could not schedule inference job %s", job_id)
+            await run_in_threadpool(self._mark_failed_after_publish_error, job_id)
+            raise SubmissionDependencyUnavailableError from exc
 
     def _publish(self, job_id: UUID) -> None:
         try:

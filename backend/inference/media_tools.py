@@ -1,10 +1,11 @@
 """Where the ffmpeg and ffprobe executables come from.
 
 Docker and local machines use the system tools on PATH. Vercel's Python
-runtime has none, so the deploy build (scripts/vercel_build.py) puts a pinned
-static build in `backend/bin/`. If that directory did not make it into the
-function bundle, the first video job on an instance downloads the same pinned
-archive to /tmp instead. The archive is checked against its SHA-256 before use.
+runtime has none, and bundling them (about 160 MB) would push the function
+past Vercel's 225 MB limit for project files, so the first video job on each
+instance downloads a pinned static build (42 MB) to /tmp. The archive is
+checked against its SHA-256 before use. A `backend/bin/` with both tools, if
+present, is used first. Photos never need ffmpeg.
 """
 
 from __future__ import annotations

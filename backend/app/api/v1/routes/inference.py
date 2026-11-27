@@ -44,7 +44,6 @@ from app.services.contracts import (
     UploadNotFoundError,
     UploadTooLargeError,
 )
-from inference.celery.celery_app import celery_app
 from inference.video import MAX_VIDEO_BYTES, VideoRejected
 
 router = APIRouter(prefix="/inference", tags=["inference"])
@@ -62,7 +61,8 @@ VIDEO_CONTENT_TYPE = "video/mp4"
 # Direct uploads are validated after a download to the function's temp
 # directory, so a deployment can cap videos below the 1 GB contract limit.
 DIRECT_UPLOAD_MAX_VIDEO_BYTES = min(
-    int(os.environ.get("INFRASCAN_DIRECT_UPLOAD_MAX_VIDEO_BYTES", MAX_VIDEO_BYTES)),
+    # strip(): values pasted or piped on Windows can carry a BOM or a newline.
+    int(str(os.environ.get("INFRASCAN_DIRECT_UPLOAD_MAX_VIDEO_BYTES", MAX_VIDEO_BYTES)).strip("\ufeff \t\r\n")),
     MAX_VIDEO_BYTES,
 )
 _IMAGE_ONLY_FIELDS = frozenset({"captured_at", "latitude", "longitude"})
@@ -77,6 +77,13 @@ SMOKE_IMAGE_PATH = (
 
 
 def _dispatch_and_await(image_bytes: bytes, filename: str | None) -> dict:
+    if os.environ.get("VERCEL"):
+        # No worker on Vercel: run the model in this function.
+        from inference.service import inference_service
+
+        return {"status": "completed", "result": inference_service(DEFAULT_WEIGHT_PATH, image_bytes, filename)}
+    from inference.celery.celery_app import celery_app
+
     image_b64 = base64.b64encode(image_bytes).decode("utf-8")
     async_result = celery_app.send_task(
         "infrascan.inference",

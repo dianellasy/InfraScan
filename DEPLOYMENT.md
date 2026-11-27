@@ -1,8 +1,13 @@
 # Deploying InfraScan to Vercel
 
 The MVP runs as two Vercel projects built from this one repository, with
-Cloudflare R2 for media and a hosted PostgreSQL database. There is no
-RabbitMQ and no always-on worker: Celery tasks run on Vercel Queues.
+Cloudflare R2 for media and Supabase for login and the PostgreSQL database.
+There is no RabbitMQ and no worker to host: on Vercel the API processes each
+inference job itself, right after answering the upload.
+
+Live (Hobby, account `atulchahar`):
+- Web: https://infrascan-web.vercel.app (project `infrascan-web`)
+- API: https://infrascan-api.vercel.app (project `infrascan-api`, `/docs` for the API)
 
 ```
 Browser ──► infrascan-web (Vite, static)          Vercel project 1
@@ -11,122 +16,145 @@ Browser ──► infrascan-web (Vite, static)          Vercel project 1
    ▼
 infrascan-api (FastAPI)                            Vercel project 2
    ├── POST /api/v1/inference/uploads   sign an R2 upload URL
-   ├── POST /api/v1/inference/jobs      validate the upload, create the job,
-   │                                    publish it (Celery → Vercel Queues)
-   └── worker (private function)        Celery task: ONNX model, geolocation,
-                                        issue linking, evidence to R2
-PostgreSQL (Supabase) ◄── both functions          Supabase Auth ◄── login
+   └── POST /api/v1/inference/jobs      validate the upload, create the job,
+                                        answer 202, then run the job in the
+                                        same function with wait_until:
+                                        ONNX model, geolocation, issue
+                                        linking, evidence to R2
+PostgreSQL (Supabase) ◄── API                     Supabase Auth ◄── login
 ```
 
 ## What changed from the Docker Compose setup
 
 | Compose (local) | Vercel |
 | --- | --- |
-| RabbitMQ + `celery worker` container | Celery with `broker="vercel://"`. `worker.py` becomes a private, queue-triggered function. Chosen automatically when `VERCEL=1`. |
+| RabbitMQ + `celery worker` container | No Celery. `app/adapters/background_queue.py` runs the same `InferenceJobProcessor` after the 202 response with Vercel's `wait_until`. Chosen automatically when `VERCEL=1`. Not durable: a job whose function is killed is not retried. |
 | Ultralytics + PyTorch (about 1 GB) | ONNX Runtime with `weights/best.onnx` (same boxes as Ultralytics, about 0.3 s per photo) |
 | Upload goes through the API (multipart) | Browser uploads straight to R2 with a signed URL. Vercel caps request bodies at 4.5 MB. |
-| `postgres:16` container | Hosted PostgreSQL through a transaction pooler |
-| ffmpeg from apt | Pinned static ffmpeg 7.0.2, bundled by `scripts/vercel_build.py` |
+| `postgres:16` container | Supabase Postgres through its transaction pooler |
+| ffmpeg from apt | Pinned static ffmpeg 7.0.2, downloaded to `/tmp` on the first video job |
 
-Docker Compose still works for local development, unchanged apart from the
-lighter worker image.
+Docker Compose still works for local development with Celery and RabbitMQ.
+`backend/requirements.txt` is for Docker and local runs; Vercel installs from
+`backend/pyproject.toml`, which leaves Celery out on purpose (the Vercel
+runtime tries to start its own Celery integration whenever Celery is
+installed, and fails).
 
-## 1. Database (Supabase Postgres)
+## 1. Supabase (login and database)
 
-The team already has a Supabase project for login, and its free Postgres is
-the simplest database. (Neon from the Vercel Marketplace works the same way.)
-
-1. In Supabase: **Project Settings → Database → Connection string**.
-2. Copy two URLs:
-   - **Transaction pooler** (port `6543`): this is `DATABASE_URL` on Vercel.
-   - **Direct connection** or **Session pooler** (port `5432`): used only to
-     run migrations from your computer.
-3. Create the tables once, and again after every new migration:
+1. Create a free project at supabase.com (or use the team's).
+2. **Project Settings → API**: copy the **Project URL** and the
+   **publishable (anon) key**.
+3. **Project Settings → Database → Connection string**, copy two URLs:
+   - **Transaction pooler** (port `6543`): `DATABASE_URL` on Vercel.
+   - **Session pooler** (port `5432`): only to create the tables.
+4. Create the tables (again after every new migration):
 
    ```powershell
    cd backend
-   $env:DATABASE_URL = "postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres"
-   alembic upgrade head
+   $env:DATABASE_URL = "<session pooler URL, port 5432>"; alembic upgrade head
    ```
+
+5. Block Supabase's public Data API from the app tables. The browser key can
+   read any table in `public` that does not have row-level security, and the
+   API connects as the table owner, so it is unaffected. In the SQL Editor:
+
+   ```sql
+   alter table public.issue_types       enable row level security;
+   alter table public.issues            enable row level security;
+   alter table public.inference_jobs    enable row level security;
+   alter table public.input_media       enable row level security;
+   alter table public.evidence_media    enable row level security;
+   alter table public.detection_records enable row level security;
+   alter table public.alembic_version   enable row level security;
+   ```
+
+6. **Authentication → URL Configuration**: set the Site URL to the web URL.
+7. **Authentication → Users**: add users. For admin pages (Detections, review
+   decisions) set the user's `app_metadata` to `{"role": "developer"}` or
+   `{"role": "municipal_administrator"}`, then sign in again.
 
 ## 2. Cloudflare R2
 
-1. Use the existing bucket. Create an R2 API token with **Object Read & Write**
-   on it for the app.
-2. Allow the browser to upload to it. This needs a token with **Admin Read &
-   Write**, used once from your computer:
+1. The app's R2 token needs **Object Read & Write** on the bucket.
+2. Allow browsers to upload. Either run
+   `python scripts/configure_r2_cors.py https://infrascan-web.vercel.app http://localhost:5173`
+   with an **Admin Read & Write** token, or in the Cloudflare dashboard open
+   **R2 → the bucket → Settings → CORS policy** and paste:
 
-   ```powershell
-   cd backend
-   python scripts/configure_r2_cors.py https://<web-project>.vercel.app http://localhost:5173
+   ```json
+   [
+     {
+       "AllowedOrigins": ["https://infrascan-web.vercel.app", "http://localhost:5173"],
+       "AllowedMethods": ["PUT"],
+       "AllowedHeaders": ["Content-Type"],
+       "MaxAgeSeconds": 3600
+     }
+   ]
    ```
 
-   Add every origin the frontend is served from, such as preview URLs you
-   want to test uploads on.
-3. Optional: add an R2 lifecycle rule that deletes `input/` objects after 30
-   days, to clean up abandoned uploads.
+3. Optional: a lifecycle rule deleting `input/` objects after 30 days cleans
+   up abandoned uploads.
 
-## 3. Vercel project: API
+## 3. Deploying with the Vercel CLI
 
-**Add New → Project**, import the repository, then:
+Both projects are linked from their folders (`vercel link`), so a deploy is:
 
-- **Root Directory:** `backend`
-- **Framework Preset:** FastAPI (detected from `pyproject.toml`)
-- **Environment Variables:**
+```powershell
+cd backend; vercel deploy --prod
+```
+```powershell
+cd "frontend/InfraScan frontend"; vercel deploy --prod
+```
+
+The CLI uploads the local folder, so commit first and deploy from a clean
+checkout of the branch you mean to ship. `.vercelignore` keeps `.env*` files,
+tests and the `.pt` weights out of the upload.
+
+### Environment variables
+
+API (`infrascan-api`, Production):
 
 | Name | Value |
 | --- | --- |
 | `DATABASE_URL` | Supabase transaction pooler URL (port 6543) |
 | `SUPABASE_URL` | `https://<ref>.supabase.co` |
-| `CORS_ALLOWED_ORIGINS` | `https://<web-project>.vercel.app` (comma-separate several) |
+| `CORS_ALLOWED_ORIGINS` | `https://infrascan-web.vercel.app,http://localhost:5173` |
 | `R2_BUCKET`, `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | Same as in `.env` |
-| `INFRASCAN_DIRECT_UPLOAD_MAX_VIDEO_BYTES` | `250000000` (see "Limits" below) |
+| `INFRASCAN_DIRECT_UPLOAD_MAX_VIDEO_BYTES` | `250000000` |
 
-Do not set `CELERY_BROKER_URL` or `CELERY_RESULT_BACKEND`: on Vercel they
-default to Vercel Queues and Vercel's runtime cache.
-
-Deploy, then open `https://<api-project>.vercel.app/test`. It should say
-`Hello InfraScan`. `/docs` shows the API.
-
-## 4. Vercel project: web
-
-Import the same repository again as a second project:
-
-- **Root Directory:** `frontend/InfraScan frontend`
-- **Framework Preset:** Vite
-- **Environment Variables:**
+Web (`infrascan-web`, Production; read at build time, so redeploy after a change):
 
 | Name | Value |
 | --- | --- |
-| `VITE_API_BASE_URL` | `https://<api-project>.vercel.app` |
+| `VITE_API_BASE_URL` | `https://infrascan-api.vercel.app` |
 | `VITE_SUPABASE_URL` | `https://<ref>.supabase.co` |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | Supabase publishable (anon) key |
 
-Then, in Supabase, go to **Authentication → URL Configuration** and add the web
-URL to the allowed redirect URLs.
+Add values with `vercel env add NAME production`. On Windows, do **not** pipe
+values from Windows PowerShell 5.1 (`"x" | vercel env add ...`): it prepends
+an invisible byte-order mark to the value. Type the value at the prompt, use
+the dashboard, or pipe from Git Bash with `printf %s "value" | vercel env add ...`.
 
-## 5. Check it works
+## 4. Check it works
 
-1. Sign in on the web app and submit one of the demo photos with a location.
-2. The job should go `pending → processing → completed` within a few seconds,
-   and the issue should appear on the map.
-3. If it stays `pending`, open the API project's **Logs** and filter for the
-   worker function. If the upload step fails with a CORS error in the browser
-   console, re-run step 2.2 with the exact web origin.
+1. `https://infrascan-api.vercel.app/test` says `Hello InfraScan`.
+2. Sign in on the web app and submit one of the demo photos with a location.
+3. The job should go `pending → processing → completed` within a few seconds,
+   and show the annotated image; the issue appears on the map.
+4. Stuck on `pending`: open the API project's **Logs**. A CORS error on the
+   upload step in the browser console means step 2.2 is missing the origin.
 
 ## Limits on the Hobby plan
 
-- **5 minutes per function call.** A photo job takes seconds. A video job
-  downloads the MP4, then decodes and analyses up to 60 frames, so keep
-  dashcam clips short (1–3 minute loop recording) and leave
-  `INFRASCAN_DIRECT_UPLOAD_MAX_VIDEO_BYTES` at about 250 MB.
-- **Function size.** The API function is about 500 MB with ffmpeg bundled.
-  New projects switch to "large functions" automatically when a function is
-  over 500 MB. If a deploy still fails on size, set
-  `INFRASCAN_BUNDLE_FFMPEG=0`: video jobs then download ffmpeg (42 MB, checked
-  against a pinned SHA-256) to `/tmp` on first use. Photos never need it.
+- **5 minutes per function call**, and the job runs inside the upload's call.
+  A photo takes seconds. A video job downloads the MP4 (and, on a fresh
+  instance, ffmpeg), then decodes and analyses up to 60 frames, so keep
+  dashcam clips short (1–3 minute loop recording).
+- **Function size.** Vercel allows 225 MB of project files per function
+  (dependencies are packaged separately). The app and model are about 65 MB,
+  so ffmpeg (160 MB) is downloaded at runtime instead of bundled.
 - **4 CPU-hours a month** of function time: tens of thousands of photos.
-- Vercel Queues, Services and large functions are in beta.
 
 ## Updating the model
 

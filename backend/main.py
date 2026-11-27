@@ -6,16 +6,43 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.adapters.celery_queue import CeleryInferenceQueue
 from app.adapters.r2_storage import R2MediaStorageAdapter
 from app.api.errors import register_exception_handlers
 from app.api.upload_limit import UploadLimitMiddleware
 from app.api.v1.router import api_router
 from app.db import create_db_engine, create_session_factory
 from app.services.inference_jobs import DatabaseInfraScanService
-from inference.celery.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
+
+
+def build_queue(session_factory, media_storage):
+    """Celery (RabbitMQ) locally and in Docker; in-process after the response on Vercel.
+
+    Imports are local so the Vercel function never loads Celery.
+    """
+    if os.environ.get("VERCEL"):
+        from app.adapters.background_queue import WaitUntilInferenceQueue
+        from app.services.inference_processing import InferenceJobProcessor
+        from inference.service import DEFAULT_WEIGHT_PATH, inference_with_annotation
+
+        def build_processor() -> InferenceJobProcessor:
+            if media_storage is None:
+                raise RuntimeError("Object storage is not configured")
+            return InferenceJobProcessor(
+                session_factory,
+                run_inference=lambda data, filename: inference_with_annotation(
+                    DEFAULT_WEIGHT_PATH, data, filename=filename
+                ),
+                media_storage=media_storage,
+            )
+
+        return WaitUntilInferenceQueue(build_processor)
+
+    from app.adapters.celery_queue import CeleryInferenceQueue
+    from inference.celery.celery_app import celery_app
+
+    return CeleryInferenceQueue(celery_app)
 
 
 @asynccontextmanager
@@ -33,9 +60,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Reads of legacy rows still work; submissions return 503 until fixed.
         logger.error("Object storage is not configured: missing %s", exc.args[0])
         media_storage = None
+    session_factory = create_session_factory(engine)
     app.state.infrascan_service = DatabaseInfraScanService(
-        create_session_factory(engine),
-        CeleryInferenceQueue(celery_app),
+        session_factory,
+        build_queue(session_factory, media_storage),
         media_storage,
     )
     try:
