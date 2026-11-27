@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Protocol, Sequence
+from typing import TYPE_CHECKING, BinaryIO, Protocol, Sequence
 from uuid import UUID
 
 from app.schemas import (
@@ -21,10 +21,6 @@ from app.schemas import (
 if TYPE_CHECKING:
     from app.models import InferenceJob
 
-# The media, job, and queue adapters below are blocking. The application
-# service calls them from a worker thread, never on the FastAPI event loop.
-# Media and job adapters are session-bound and never commit; the caller owns
-# the transaction.
 
 
 class StoredMedia(Protocol):
@@ -34,16 +30,45 @@ class StoredMedia(Protocol):
 
 
 class MediaStorageAdapter(Protocol):
-    def store(
-        self, data: bytes, content_type: str, filename: str | None
-    ) -> StoredMedia:
-        """Store one validated image inside the caller's open transaction."""
+    """Object storage for media payloads. Keys never start with "/"."""
+
+    def put(self, data: bytes, object_key: str, content_type: str) -> None:
+        """Store a small, already-bounded payload such as a JPEG."""
+        ...
+
+    def put_file(self, source: BinaryIO, object_key: str, content_type: str) -> None:
+        """Stream a seekable file to storage from its start (multipart when large)."""
+        ...
+
+    def get(self, key: str) -> bytes:
+        """Return a small object such as a JPEG; implementations cap the size."""
+        ...
+
+    def download_to_file(self, key: str, target: BinaryIO, max_bytes: int) -> int:
+        """Stream an object into `target`; fail before writing past `max_bytes`."""
+        ...
+
+    def delete(self, key: str) -> None:
+        """Delete an object; deleting a missing key is not an error."""
         ...
 
 
+class DirectUploadStorageAdapter(MediaStorageAdapter, Protocol):
+    """Storage the browser can upload to directly with a short-lived signed URL."""
+
+    def presign_put(
+        self, key: str, content_type: str, content_length: int, expires_in: int
+    ) -> str:
+        """A URL accepting one PUT of exactly `content_length` bytes of `content_type`."""
+        ...
+
+    def size(self, key: str) -> int | None:
+        """Size in bytes of a stored object, or None if it does not exist."""
+        ...
+
 class InferenceJobRepositoryAdapter(Protocol):
     def create_pending(
-        self, media: StoredMedia, metadata: InferenceSubmissionMetadata
+        self, media: StoredMedia, metadata: InferenceSubmissionMetadata, user_id: UUID
     ) -> InferenceJob: ...
 
     def get(self, job_id: UUID) -> InferenceJob | None: ...

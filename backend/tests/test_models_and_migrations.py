@@ -24,7 +24,7 @@ from postgres_support import run_alembic as _run_alembic
 
 REPO_ROOT = BACKEND_DIR.parent
 ALEMBIC_INI = BACKEND_DIR / "alembic.ini"
-HEAD_REVISION = "9e2b6d4f1a37"
+HEAD_REVISION = "f6b8d0e2a374"
 
 
 def _load_alembic_runtime():
@@ -44,13 +44,12 @@ def test_shared_metadata_defines_only_application_tables() -> None:
         "inference_jobs",
         "evidence_media",
         "detection_records",
+        "issue_types",
+        "issues",
     }
     assert "users" not in Base.metadata.tables
     assert "celery_taskmeta" not in Base.metadata.tables
     assert "celery_tasksetmeta" not in Base.metadata.tables
-    # Deferred until their tables exist; no placeholders are declared.
-    assert "issues" not in Base.metadata.tables
-    assert "issue_types" not in Base.metadata.tables
 
 
 def test_input_media_model_columns_and_relationship() -> None:
@@ -60,17 +59,25 @@ def test_input_media_model_columns_and_relationship() -> None:
         "data",
         "content_type",
         "filename",
+        "object_storage_key",
     }
 
     assert table.c.media_id.primary_key is True
     assert table.c.media_id.nullable is False
-    assert table.c.data.nullable is False
+    assert table.c.data.nullable is True
     assert (
         table.c.data.type.dialect_impl(postgresql.dialect()).__class__
         is postgresql.BYTEA
     )
     assert table.c.content_type.nullable is False
     assert table.c.filename.nullable is True
+    assert table.c.object_storage_key.nullable is True
+    check_names = {
+        constraint.name
+        for constraint in table.constraints
+        if isinstance(constraint, sa.CheckConstraint)
+    }
+    assert check_names == {"ck_input_media_data_or_object_storage_key"}
 
     rel = sa.inspect(InputMedia).relationships["jobs"]
     assert rel.back_populates == "input_media"
@@ -100,9 +107,16 @@ def test_inference_job_model_columns_defaults_and_constraints() -> None:
     assert table.c.job_id.nullable is False
     assert table.c.job_id.default is not None
 
-    # Authentication is not implemented and no users table exists yet.
+    # A Supabase Auth user UUID: Auth is a separate database, so no foreign key.
+    # Nullable only for historical jobs; owner-scoped reads use the index.
     assert table.c.user_id.nullable is True
     assert len(table.c.user_id.foreign_keys) == 0
+    owner_indexes = [
+        idx for idx in table.indexes if [col.name for col in idx.columns] == ["user_id"]
+    ]
+    assert [(idx.name, idx.unique) for idx in owner_indexes] == [
+        ("ix_inference_jobs_user_id", False)
+    ]
 
     # Required FK to input_media with ON DELETE RESTRICT, non-unique index.
     assert table.c.input_media_id.nullable is False
@@ -250,8 +264,18 @@ def test_alembic_renders_upgrade_and_downgrade_sql_offline() -> None:
     assert "bounding_box JSONB NOT NULL" in sql
     assert "location JSONB," in sql
     assert "confidence DOUBLE PRECISION NOT NULL" in sql
-    assert "REFERENCES issues" not in sql
-    assert "REFERENCES issue_types" not in sql
+    assert "REFERENCES issues (issue_id)" in sql
+    assert "REFERENCES issue_types (code)" in sql
+    assert "ADD COLUMN object_storage_key" in sql
+    assert sql.count("ADD COLUMN object_storage_key") == 2
+    assert "ck_input_media_data_or_object_storage_key" in sql
+    assert "ck_evidence_media_data_or_object_storage_key" in sql
+    assert "data IS NOT NULL OR object_storage_key IS NOT NULL" in sql
+    assert "CREATE INDEX ix_inference_jobs_user_id ON inference_jobs (user_id)" in sql
+    assert "ALTER TABLE issues ADD COLUMN review_note TEXT" in sql
+    assert "ALTER TABLE issues ADD COLUMN reviewed_by UUID" in sql
+    assert "ALTER TABLE issues ADD COLUMN reviewed_at TIMESTAMP WITH TIME ZONE" in sql
+    assert "auth.users" not in sql
 
     downgrade = _run_alembic(
         "downgrade",

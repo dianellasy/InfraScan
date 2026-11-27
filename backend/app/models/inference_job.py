@@ -72,11 +72,14 @@ class InferenceJob(Base):
         default=uuid4,
         server_default=text("gen_random_uuid()"),
     )
-    # Authentication is deferred and no `users` table exists yet; keep nullable
-    # without inventing a foreign key target until auth persistence lands.
+    # The submitter's Supabase Auth user UUID (the verified JWT `sub`). Supabase
+    # Auth is a separate database, so there is no foreign key. NULL only for
+    # historical jobs created before authentication; every authenticated
+    # submission sets it.
     user_id: Mapped[UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         nullable=True,
+        index=True,
     )
     input_media_id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True),

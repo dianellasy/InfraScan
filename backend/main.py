@@ -7,7 +7,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.adapters.celery_queue import CeleryInferenceQueue
+from app.adapters.r2_storage import R2MediaStorageAdapter
 from app.api.errors import register_exception_handlers
+from app.api.upload_limit import UploadLimitMiddleware
 from app.api.v1.router import api_router
 from app.db import create_db_engine, create_session_factory
 from app.services.inference_jobs import DatabaseInfraScanService
@@ -25,8 +27,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         return
 
     engine = create_db_engine()
+    try:
+        media_storage = R2MediaStorageAdapter()
+    except KeyError as exc:
+        # Reads of legacy rows still work; submissions return 503 until fixed.
+        logger.error("Object storage is not configured: missing %s", exc.args[0])
+        media_storage = None
     app.state.infrascan_service = DatabaseInfraScanService(
-        create_session_factory(engine), CeleryInferenceQueue(celery_app)
+        create_session_factory(engine),
+        CeleryInferenceQueue(celery_app),
+        media_storage,
     )
     try:
         yield
@@ -35,13 +45,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         engine.dispose()
 
 
+DEFAULT_CORS_ALLOWED_ORIGINS = "http://localhost:5173"
+
+
+def cors_allowed_origins(raw: str | None) -> list[str]:
+    """Exact origins from a comma-separated list; wildcards are rejected."""
+    value = DEFAULT_CORS_ALLOWED_ORIGINS if raw is None or not raw.strip() else raw
+    origins = [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
+    if "*" in origins:
+        raise RuntimeError("CORS_ALLOWED_ORIGINS must list exact origins, not '*'")
+    return origins
+
+
 app = FastAPI(title="InfraScan API", version="1.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=cors_allowed_origins(os.environ.get("CORS_ALLOWED_ORIGINS")),
     allow_methods=["GET", "POST", "PATCH"],
-    allow_headers=["*"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+app.add_middleware(UploadLimitMiddleware)
 register_exception_handlers(app)
 app.include_router(api_router, prefix="/api/v1")
 

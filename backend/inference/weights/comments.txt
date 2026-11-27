@@ -1,6 +1,17 @@
-best.pt = infrascan-rdd2022-yolo11s, version v0-mvp (11 Nov 2026).
-YOLO11s trained on RDD2022 (4 classes, order: 0 Longitudinal crack,
-1 Transverse crack, 2 Alligator crack, 3 Pothole). Input size 640.
-Pothole at confidence 0.25 on our test split: precision 0.645, recall 0.393.
+best.onnx = the deployed model. It is best.pt exported with ultralytics 8.4.210:
+    YOLO("best.pt").export(format="onnx", imgsz=640, dynamic=True, simplify=True, opset=17)
+inference/service.py runs it with ONNX Runtime (no torch/ultralytics needed).
+scripts/check_onnx_parity.py checks it against ultralytics: on the 17 demo photos
+every photo gives the same number of boxes, matched boxes IoU >= 0.90 and
+confidence within 0.05. Re-export and re-run that check whenever best.pt changes.
+
+best.pt = infrascan-yolo26s-rdd2022-cmird, version v1 (run e7, trained 18 Nov 2026).
+YOLO26s trained on RDD2022 India + United States (leak-free split) plus CMIRD Indian motorbike frames.
+4 classes, order: 0 Longitudinal crack, 1 Transverse crack, 2 Alligator crack, 3 Pothole. Input size 640.
+Needs Ultralytics with YOLO26 support (trained and tested with 8.4.210).
+Pothole at confidence 0.25 on our test split: precision 0.56, recall 0.46 (box level);
+118 of 165 test photos with potholes found, 17 photos wrongly flagged.
 This does NOT meet the PRD pothole target (90% precision, 85% recall).
+Licence: trained partly on CMIRD (CC BY-NC-SA 4.0), so not for commercial use.
+Previous model (v0-mvp, YOLO11s) is in git commit c4bfda1.
 Full numbers and limits: ml/MODEL_CARD.md

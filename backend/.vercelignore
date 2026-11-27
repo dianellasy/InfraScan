@@ -1,0 +1,10 @@
+# Not needed at runtime; keeps the Python function bundle small.
+tests/
+.venv/
+**/__pycache__/
+.pytest_cache/
+inference/weights/*.pt
+inference/data/
+scripts/check_onnx_parity.py
+Dockerfile
+inference/Dockerfile

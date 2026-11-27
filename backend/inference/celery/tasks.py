@@ -1,12 +1,12 @@
 import base64
 import logging
 import os
-import time
 from pathlib import Path
 from uuid import UUID
 
 from celery.signals import worker_process_init, worker_process_shutdown
 
+from app.adapters.r2_storage import R2MediaStorageAdapter
 from app.services.inference_processing import InferenceJobProcessor
 from inference.celery import database
 from inference.celery.celery_app import PROCESS_INFERENCE_JOB_TASK, celery_app
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 @worker_process_init.connect
 def preload_model(**kwargs):
-    """Warm YOLO weights in each prefork child so the first task is not a cold load."""
+    """Warm the ONNX model in each prefork child so the first task is not a cold load."""
     if Path(DEFAULT_WEIGHT_PATH).exists():
         get_model(DEFAULT_WEIGHT_PATH)
 
@@ -44,13 +44,21 @@ def add(x, y):
 def inference_worker(weight_path, image_b64, filename=None):
     resolved_weight = weight_path or DEFAULT_WEIGHT_PATH
     image_bytes = base64.b64decode(image_b64)
-    time.sleep(4)
     result = inference_service(resolved_weight, image_bytes, filename=filename)
     return {"status": "completed", "result": result}
 
 
 def run_v0_mvp_inference(image_bytes, filename):
     return inference_with_annotation(DEFAULT_WEIGHT_PATH, image_bytes, filename=filename)
+
+
+def build_processor() -> InferenceJobProcessor:
+    return InferenceJobProcessor(
+        database.get_session_factory(),
+        run_inference=run_v0_mvp_inference,
+        media_storage=R2MediaStorageAdapter(),
+        work_dir=os.environ.get("INFRASCAN_WORK_DIR") or None,
+    )
 
 
 # Results live in the application tables; the Celery result backend is unused.
@@ -61,7 +69,4 @@ def process_inference_job(job_id: str) -> None:
     except (TypeError, ValueError, AttributeError):
         logger.error("Ignoring inference task with invalid job_id %r", job_id)
         return
-    processor = InferenceJobProcessor(
-        database.get_session_factory(), run_inference=run_v0_mvp_inference
-    )
-    processor.process(parsed_job_id)
+    build_processor().process(parsed_job_id)

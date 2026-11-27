@@ -1,0 +1,70 @@
+.auth-status {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  padding: 24px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.auth-status h1 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1.4rem;
+}
+
+.auth-status p {
+  margin: 0;
+}
+
+.account-menu {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.account-identity {
+  display: grid;
+  min-width: 0;
+  text-align: right;
+  line-height: 1.25;
+}
+
+.account-email {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 0.84rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-role {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.sign-out-button {
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.sign-out-button:hover {
+  background: #edf1ef;
+}
+
+@media (max-width: 720px) {
+  .account-identity {
+    display: none;
+  }
+}

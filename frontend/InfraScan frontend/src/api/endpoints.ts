@@ -13,13 +13,22 @@ function endpoint(method: HttpMethod, path: string): Endpoint {
   return { method, url: `${API_BASE_URL}${path}` };
 }
 
+/** Resolve an API-relative path (e.g. an evidence thumbnail URL) against the API origin. */
+export function apiUrl(path: string): string {
+  return new URL(path, API_BASE_URL).toString();
+}
+
 export const endpoints = {
+  inferenceUploads: endpoint("POST", "/api/v1/inference/uploads"),
   inferenceJobs: endpoint("POST", "/api/v1/inference/jobs"),
   issues: endpoint("GET", "/api/v1/issues"),
+  issueMap: endpoint("GET", "/api/v1/issues/map"),
   createIssue: endpoint("POST", "/api/v1/issues"),
   issueReviewQueue: endpoint("GET", "/api/v1/issues/review-queue"),
   issue: (issueId: string) =>
     endpoint("GET", `/api/v1/issues/${encodeURIComponent(issueId)}`),
+  issueDetections: (issueId: string) =>
+    endpoint("GET", `/api/v1/issues/${encodeURIComponent(issueId)}/detections`),
   updateIssue: (issueId: string) =>
     endpoint("PATCH", `/api/v1/issues/${encodeURIComponent(issueId)}`),
   jobs: endpoint("GET", "/api/v1/jobs"),

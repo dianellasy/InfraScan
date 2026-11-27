@@ -1,0 +1,228 @@
+{
+ "n_labeled_images": 12511,
+ "xml_without_image": 0,
+ "test_folders": {
+  "China_MotorBike/China_MotorBike/test": {
+   "images": 500,
+   "xml": 0
+  },
+  "Czech/Czech/test": {
+   "images": 709,
+   "xml": 0
+  },
+  "India/India/test": {
+   "images": 1959,
+   "xml": 0
+  },
+  "Japan/Japan/test": {
+   "images": 2627,
+   "xml": 0
+  },
+  "Norway/Norway/test": {
+   "images": 2040,
+   "xml": 0
+  },
+  "United_States/United_States/test": {
+   "images": 1200,
+   "xml": 0
+  }
+ },
+ "seed": 42,
+ "block": 30,
+ "max_side": 1280,
+ "dark_mean_threshold": 60,
+ "countries": [
+  "India",
+  "United_States"
+ ],
+ "class_set": "rdd5",
+ "classes": {
+  "D00": "Longitudinal crack",
+  "D10": "Transverse crack",
+  "D20": "Alligator crack",
+  "D40": "Pothole",
+  "D50": "Manhole cover"
+ },
+ "dup_merge_dist": 4,
+ "dup_merge_mad": 5.0,
+ "split_rule": "balanced",
+ "split_units": {
+  "block_groups": 491,
+  "split_units": 461,
+  "merged_units": 25,
+  "largest_unit_images": 120,
+  "largest_units_images": [
+   120,
+   90,
+   73,
+   68,
+   60,
+   60,
+   60,
+   60,
+   60,
+   60
+  ]
+ },
+ "per_country": {
+  "India": {
+   "images": 7706,
+   "sizes": {
+    "720x720": 7706
+   },
+   "boxes": {
+    "D40": 3187,
+    "D00": 1555,
+    "D20": 2021,
+    "D10": 68,
+    "D50": 28
+   },
+   "images_with_pothole": 1530,
+   "empty_images": 4465,
+   "dark_images": 9,
+   "splits": {
+    "val": 773,
+    "train": 6178,
+    "test": 755
+   }
+  },
+  "United_States": {
+   "images": 4805,
+   "sizes": {
+    "640x640": 4805
+   },
+   "boxes": {
+    "D10": 3295,
+    "D00": 6750,
+    "D20": 834,
+    "D40": 135
+   },
+   "images_with_pothole": 116,
+   "empty_images": 0,
+   "dark_images": 0,
+   "splits": {
+    "train": 3845,
+    "test": 480,
+    "val": 480
+   }
+  }
+ },
+ "per_split": {
+  "val": {
+   "images": 1253,
+   "boxes": {
+    "D40": 340,
+    "D00": 884,
+    "D20": 265,
+    "D50": 5,
+    "D10": 360
+   },
+   "images_with_pothole": 161,
+   "empty_images": 456
+  },
+  "train": {
+   "images": 10023,
+   "boxes": {
+    "D00": 6570,
+    "D40": 2624,
+    "D20": 2302,
+    "D10": 2690,
+    "D50": 19
+   },
+   "images_with_pothole": 1320,
+   "empty_images": 3580
+  },
+  "test": {
+   "images": 1235,
+   "boxes": {
+    "D20": 288,
+    "D40": 358,
+    "D00": 851,
+    "D10": 313,
+    "D50": 4
+   },
+   "images_with_pothole": 165,
+   "empty_images": 429
+  }
+ },
+ "total_boxes": {
+  "D40": 3322,
+  "D00": 8305,
+  "D20": 2855,
+  "D10": 3363,
+  "D50": 28
+ },
+ "images_with_pothole": 1646,
+ "other_labels_dropped": {
+  "D44": 1062,
+  "D01": 179,
+  "D43": 57,
+  "D11": 45,
+  "D0w0": 1
+ },
+ "box_flags": {
+  "exif_orientation_tag": 2,
+  "exif_boxes_in_raw_frame": 2
+ },
+ "exif_orientations": {
+  "1": 12509,
+  "8": 1,
+  "6": 1
+ },
+ "brightness_percentiles": {
+  "1": 87.9,
+  "5": 105.0,
+  "10": 113.5,
+  "50": 142.0,
+  "90": 165.5
+ },
+ "near_duplicate_pairs_total": 9139,
+ "near_duplicate_pairs_across_splits": {
+  "total": 3282,
+  "by_split_pair": {
+   "train-val": 1556,
+   "test-train": 1540,
+   "test-val": 186
+  },
+  "max_hamming": 4,
+  "method": "exact all-pairs",
+  "note": "raw dHash candidates; most are look-alike roads, not copies"
+ },
+ "confirmed_duplicate_pairs_total": 30,
+ "confirmed_duplicate_pairs_across_splits": {
+  "total": 0,
+  "by_split_pair": {},
+  "rule": "dHash<=4, same country, MAD<5.0"
+ },
+ "lookalike_pairs_total": 246,
+ "lookalike_pairs_across_splits": {
+  "total": 65,
+  "by_split_pair": {
+   "train-val": 37,
+   "test-train": 25,
+   "test-val": 3
+  },
+  "rule": "same country, MAD<8.0",
+  "note": "informational: same road at another spot, not repeated frames"
+ },
+ "split_balance": {
+  "India": {
+   "val_share": 0.1003,
+   "test_share": 0.098,
+   "pothole_images": {
+    "train": 1227,
+    "val": 150,
+    "test": 153
+   }
+  },
+  "United_States": {
+   "val_share": 0.0999,
+   "test_share": 0.0999,
+   "pothole_images": {
+    "train": 93,
+    "val": 11,
+    "test": 12
+   }
+  }
+ }
+}

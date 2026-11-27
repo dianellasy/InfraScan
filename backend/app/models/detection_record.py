@@ -23,6 +23,7 @@ from app.models.base import Base
 
 if TYPE_CHECKING:
     from app.models.inference_job import InferenceJob
+    from app.models.issue import Issue
     from app.models.media import EvidenceMedia
 
 
@@ -66,16 +67,22 @@ def _jsonb() -> JSON:
 class DetectionRecord(Base):
     """One road-damage detection produced by an inference job.
 
-    `issue_type` provisionally stores the v0-mvp model class ID
-    (see `inference/labels.py`), not a permanent domain identifier. The
-    diagram's foreign keys for `issue_id` and `issue_type` are deferred until
-    the `issues` and `issue_types` tables exist; that later migration must
-    define the class-ID mapping and convert stored values.
+    `issue_type` stores the raw v0-mvp model class ID (see
+    `inference/labels.py`), preserved as predicted so classification conflicts
+    within an Issue stay visible. `MODEL_CLASS_ISSUE_TYPES` maps it to a
+    canonical issue type; it deliberately has no foreign key. `issue_id` links
+    the detection to the canonical Issue it supports (see
+    `app.services.issue_linking`); it is NULL only for unmapped model classes
+    and for historical rows that have not been backfilled.
+
+    `observed_at` is when the source image or video frame was captured (UTC),
+    while `detected_at` is when inference finished. `observed_at` is NULL only
+    for historical video rows whose frame time cannot be reconstructed.
 
     `bounding_box` is `[x1, y1, x2, y2]` in pixels of the prediction source
     image at its original dimensions (not normalized YOLO coordinates and not
-    a fixed 640x640 grid). `location` stays NULL until detection-level GPS is
-    calculated; capture coordinates remain on `InferenceJob`.
+    a fixed 640x640 grid). `location` holds prototype projected GPS, or NULL
+    when a box cannot be projected. Capture coordinates remain on `InferenceJob`.
     """
 
     __tablename__ = "detection_records"
@@ -110,7 +117,9 @@ class DetectionRecord(Base):
     )
     issue_id: Mapped[UUID | None] = mapped_column(
         Uuid(as_uuid=True),
+        ForeignKey("issues.issue_id", ondelete="RESTRICT"),
         nullable=True,
+        index=True,
     )
     issue_type: Mapped[int] = mapped_column(
         Integer(),
@@ -146,6 +155,10 @@ class DetectionRecord(Base):
         DateTime(timezone=True),
         nullable=False,
     )
+    observed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     job: Mapped[InferenceJob] = relationship(
         "InferenceJob",
@@ -154,4 +167,8 @@ class DetectionRecord(Base):
     evidence: Mapped[EvidenceMedia | None] = relationship(
         "EvidenceMedia",
         back_populates="detection_records",
+    )
+    issue: Mapped[Issue | None] = relationship(
+        "Issue",
+        back_populates="detections",
     )

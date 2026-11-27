@@ -1,6 +1,6 @@
 import math
 from datetime import UTC, datetime
-from typing import Annotated, Generic, Literal, TypeVar
+from typing import Annotated, Generic, Literal, Self, TypeVar
 from uuid import UUID
 
 from pydantic import (
@@ -11,7 +11,11 @@ from pydantic import (
     Field,
     HttpUrl,
     field_validator,
+    model_validator,
 )
+
+from app.models.detection_record import DetectionSeverity
+from app.models.issue import IssueStatus, IssueTypeCode
 
 T = TypeVar("T")
 
@@ -69,10 +73,78 @@ class InferenceSubmissionMetadata(BaseModel):
         return float(value)
 
 
+MIN_CAMERA_UTC_OFFSET_MINUTES = -720
+MAX_CAMERA_UTC_OFFSET_MINUTES = 840
+
+
+class VideoSubmissionMetadata(BaseModel):
+    """Client metadata for an A119 Mini 2 MP4; time and place come from its GPS."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    camera_utc_offset_minutes: int = Field(
+        ge=MIN_CAMERA_UTC_OFFSET_MINUTES,
+        le=MAX_CAMERA_UTC_OFFSET_MINUTES,
+        description=(
+            "The dashcam's configured time-zone offset from UTC in minutes, "
+            "for example -480 for UTC-08:00. Must be a multiple of 15."
+        ),
+    )
+
+    @field_validator("camera_utc_offset_minutes", mode="before")
+    @classmethod
+    def validate_offset(cls, value: object) -> int:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError("camera_utc_offset_minutes must be a JSON integer")
+        if value % 15:
+            raise ValueError("camera_utc_offset_minutes must be a multiple of 15")
+        return value
+
+
+class ResolvedVideoSubmission(InferenceSubmissionMetadata):
+    """Server-derived job metadata for a validated MP4: the first valid GPS fix."""
+
+    camera_utc_offset_minutes: int
+
+
 class InferenceJobAccepted(BaseModel):
     job_id: UUID
     status: Literal["pending"]
     submitted_at: Annotated[AwareDatetime, AfterValidator(_normalize_utc)]
+
+
+DirectUploadContentType = Literal["image/jpeg", "video/mp4"]
+
+
+class DirectUploadRequest(BaseModel):
+    """Ask for a signed URL to upload one JPEG or MP4 straight to object storage."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    content_type: DirectUploadContentType
+    size_bytes: int = Field(gt=0, description="Exact size of the file that will be uploaded.")
+
+
+class DirectUploadTicket(BaseModel):
+    upload_id: UUID
+    upload_url: str = Field(description="PUT the file here, with exactly `headers`.")
+    method: Literal["PUT"] = "PUT"
+    headers: dict[str, str]
+    expires_in_seconds: int
+
+
+class DirectJobSubmission(BaseModel):
+    """Start inference on a file already uploaded with a `DirectUploadTicket`.
+
+    `metadata` follows the same contract as the multipart `metadata` part.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    upload_id: UUID
+    content_type: DirectUploadContentType
+    filename: str | None = Field(default=None, max_length=255)
+    metadata: dict[str, object]
 
 
 class InferenceJobDTO(InferenceJobAccepted):
@@ -96,19 +168,187 @@ class IssueCreate(BaseModel):
 
 
 class IssueUpdate(BaseModel):
+    """A reviewer's decision on an Issue. Omitted fields stay unchanged."""
+
     model_config = ConfigDict(extra="forbid")
 
-    title: str | None = Field(default=None, min_length=1, max_length=255)
-    description: str | None = None
-    status: str | None = None
-    severity: str | None = None
+    status: IssueStatus | None = Field(
+        default=None,
+        description=(
+            "accepted (a real issue), dismissed (not a real issue), resolved "
+            "(repaired), or pending_review to reopen it."
+        ),
+    )
+    severity: DetectionSeverity | None = None
+    review_note: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def require_a_change(self) -> Self:
+        if self.status is None and self.severity is None and self.review_note is None:
+            raise ValueError("Set at least one of status, severity or review_note")
+        return self
 
 
-class IssueDTO(IssueCreate):
+Latitude = Annotated[float, Field(ge=-90, le=90)]
+Longitude = Annotated[float, Field(ge=-180, le=180)]
+
+
+class BoundingBox(BaseModel):
+    """Inclusive viewport; boxes crossing the antimeridian are not supported."""
+
+    min_latitude: Latitude
+    min_longitude: Longitude
+    max_latitude: Latitude
+    max_longitude: Longitude
+
+    @model_validator(mode="after")
+    def validate_order(self) -> Self:
+        if self.min_latitude > self.max_latitude:
+            raise ValueError("min_latitude must be less than or equal to max_latitude")
+        if self.min_longitude > self.max_longitude:
+            raise ValueError(
+                "min_longitude must be less than or equal to max_longitude; "
+                "bounding boxes crossing the antimeridian are not supported"
+            )
+        return self
+
+    def as_geojson_bbox(self) -> tuple[float, float, float, float]:
+        """RFC 7946 order: west, south, east, north."""
+        return (
+            self.min_longitude,
+            self.min_latitude,
+            self.max_longitude,
+            self.max_latitude,
+        )
+
+
+class IssueFilters(BaseModel):
+    """Server-side Issue filters; repeat a list parameter to match any value."""
+
+    issue_type: list[IssueTypeCode] = Field(default_factory=list)
+    severity: list[DetectionSeverity] = Field(default_factory=list)
+    status: list[IssueStatus] = Field(default_factory=list)
+    review_required: bool = False
+    last_seen_after: AwareDatetime | None = None
+    last_seen_before: AwareDatetime | None = None
+    job_id: UUID | None = Field(
+        default=None,
+        description="Only Issues supported by at least one detection from this inference job.",
+    )
+
+    @model_validator(mode="after")
+    def validate_last_seen_range(self) -> Self:
+        if (
+            self.last_seen_after is not None
+            and self.last_seen_before is not None
+            and self.last_seen_after > self.last_seen_before
+        ):
+            raise ValueError("last_seen_after must not be later than last_seen_before")
+        return self
+
+
+ISSUE_MAP_DEFAULT_LIMIT = 500
+ISSUE_MAP_MAX_LIMIT = 1000
+
+
+class IssueMapQuery(BoundingBox, IssueFilters):
+    limit: int = Field(default=ISSUE_MAP_DEFAULT_LIMIT, ge=1, le=ISSUE_MAP_MAX_LIMIT)
+
+    def filters(self) -> IssueFilters:
+        return IssueFilters.model_validate(
+            self.model_dump(include=set(IssueFilters.model_fields))
+        )
+
+    def bounding_box(self) -> BoundingBox:
+        return BoundingBox.model_validate(
+            self.model_dump(include=set(BoundingBox.model_fields))
+        )
+
+
+class IssueListQuery(IssueFilters):
+    page: int = Field(default=1, ge=1)
+    page_size: int = Field(default=50, ge=1, le=100)
+    min_latitude: Latitude | None = None
+    min_longitude: Longitude | None = None
+    max_latitude: Latitude | None = None
+    max_longitude: Longitude | None = None
+
+    @model_validator(mode="after")
+    def validate_bounding_box(self) -> Self:
+        self.bounding_box()
+        return self
+
+    def filters(self) -> IssueFilters:
+        return IssueFilters.model_validate(
+            self.model_dump(include=set(IssueFilters.model_fields))
+        )
+
+    def bounding_box(self) -> BoundingBox | None:
+        values = self.model_dump(include=set(BoundingBox.model_fields))
+        provided = [v for v in values.values() if v is not None]
+        if not provided:
+            return None
+        if len(provided) != len(values):
+            raise ValueError(
+                "min_latitude, min_longitude, max_latitude, and max_longitude "
+                "must be provided together"
+            )
+        return BoundingBox.model_validate(values)
+
+
+class IssueSummaryFields(BaseModel):
     issue_id: UUID
+    issue_type_code: str
+    issue_type_name: str
+    severity: str
     status: str
+    review_reason: str | None = None
+    needs_review: bool
+    location_accuracy_m: float | None = Field(default=None, ge=0)
+    first_seen_at: datetime
+    last_seen_at: datetime
+    detection_count: int = Field(ge=0)
+    evidence_thumbnail_url: str | None = Field(
+        default=None,
+        description="Path relative to the API origin for the representative evidence image.",
+    )
+
+
+class IssueDTO(IssueSummaryFields):
+    latitude: Latitude | None = None
+    longitude: Longitude | None = None
     created_at: datetime
     updated_at: datetime
+    review_note: str | None = None
+    reviewed_at: datetime | None = None
+
+
+class PointGeometry(BaseModel):
+    type: Literal["Point"] = "Point"
+    coordinates: tuple[Longitude, Latitude] = Field(
+        description="[longitude, latitude] per RFC 7946."
+    )
+
+
+class IssueFeature(BaseModel):
+    type: Literal["Feature"] = "Feature"
+    id: UUID
+    geometry: PointGeometry
+    properties: IssueSummaryFields
+
+
+class IssueMapMeta(BaseModel):
+    limit: int = Field(ge=1)
+    returned: int = Field(ge=0)
+    total: int = Field(ge=0, description="Matching located Issues in the viewport.")
+    truncated: bool
+
+
+class IssueFeatureCollection(BaseModel):
+    type: Literal["FeatureCollection"] = "FeatureCollection"
+    bbox: tuple[Longitude, Latitude, Longitude, Latitude]
+    features: list[IssueFeature]
+    meta: IssueMapMeta
 
 
 class RoadDTO(BaseModel):
@@ -132,10 +372,28 @@ class DetectionDTO(BaseModel):
     confidence: float = Field(ge=0, le=1)
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
-    detected_at: datetime
-    issue_id: UUID | None = None
-    # Provisional: the v0-mvp model class ID, not a permanent issue-type ID.
+    detected_at: datetime = Field(description="When inference finished.")
+    observed_at: datetime | None = Field(
+        default=None,
+        description=(
+            "When the source image or video frame was captured (UTC); NULL only for "
+            "historical video detections whose frame time is unknown."
+        ),
+    )
+    issue_id: UUID | None = Field(
+        default=None,
+        description=(
+            "The canonical Issue this detection supports; NULL for an unmapped "
+            "model class or a historical row that has not been backfilled."
+        ),
+    )
+    issue_status: str | None = Field(
+        default=None,
+        description="Review status of the Issue this detection supports, when it has one.",
+    )
+    # Raw v0-mvp model class ID as predicted, not a canonical issue type.
     issue_type: int | None = None
+    predicted_issue_type_code: str | None = None
     evidence_media: UUID | None = None
     location: DetectionLocation | None = None
     bounding_box: (
@@ -187,6 +445,12 @@ class DamageDistributionDTO(BaseModel):
     severity: str
     detection_count: int = Field(ge=0)
     percentage: float = Field(ge=0, le=100)
+
+
+class CurrentUserDTO(BaseModel):
+    id: UUID = Field(description="Supabase Auth user ID (the access token's `sub`).")
+    role: str
+    municipality_id: str | None = None
 
 
 class APIError(BaseModel):

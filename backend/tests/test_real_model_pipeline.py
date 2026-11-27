@@ -1,7 +1,7 @@
-"""Real v0-mvp model path. Skipped unless ultralytics and the weights are available.
+"""Real model path. Skipped unless onnxruntime and the weights are available.
 
 Unlike `test_inference_workflow.py`, nothing here mocks the model: these
-tests load `inference/weights/best.pt` and run YOLO on CPU.
+tests load `inference/weights/best.onnx` and run it on CPU.
 """
 
 from __future__ import annotations
@@ -14,10 +14,11 @@ from uuid import UUID
 
 import pytest
 
-pytest.importorskip("ultralytics")
+pytest.importorskip("onnxruntime")
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from auth_support import citizen_a  # noqa: E402
 from PIL import Image  # noqa: E402
 from sqlalchemy.orm import Session, sessionmaker  # noqa: E402
 
@@ -25,9 +26,9 @@ from inference import service as inference  # noqa: E402
 from inference.labels import CLASS_LABELS  # noqa: E402
 
 if not Path(inference.DEFAULT_WEIGHT_PATH).is_file():
-    pytest.skip("Shipped v0-mvp weights are missing", allow_module_level=True)
+    pytest.skip("Shipped model weights are missing", allow_module_level=True)
 
-FIXTURE_PATH = Path(__file__).parent / "fixtures" / "v0_mvp_multi_png_output.json"
+FIXTURE_PATH = Path(__file__).parent / "fixtures" / "v1_multi_png_output.json"
 SMOKE_IMAGE = Path(inference.DEFAULT_IMAGE_PATH)
 DETECTION_KEYS = {"class_ids", "label", "classification", "severity", "confidence", "bbox_xyxy"}
 
@@ -38,12 +39,27 @@ def _jpeg(image: Image.Image) -> bytes:
     return buffer.getvalue()
 
 
+class InMemoryMediaStorage:
+    def __init__(self) -> None:
+        self.objects: dict[str, bytes] = {}
+
+    def put(self, data: bytes, object_key: str, content_type: str) -> None:
+        self.objects[object_key] = data
+
+    def get(self, key: str) -> bytes:
+        return self.objects[key]
+
+    def delete(self, key: str) -> None:
+        self.objects.pop(key, None)
+
+
 def test_service_uses_central_label_map() -> None:
     assert inference.label_map is CLASS_LABELS
-    assert inference.MODEL_NAME == "infrascan-rdd2022-yolo11s"
-    assert inference.MODEL_VERSION == "v0-mvp"
+    assert inference.MODEL_NAME == "infrascan-yolo26s-rdd2022-cmird"
+    assert inference.MODEL_VERSION == "v1"
 
 
+@pytest.mark.skipif(not SMOKE_IMAGE.is_file(), reason="Original multi.png reference fixture is not present")
 def test_real_inference_returns_v0_contract_and_in_memory_evidence() -> None:
     output_mtime = inference.OUTPUT_PATH.stat().st_mtime_ns if inference.OUTPUT_PATH.exists() else None
 
@@ -53,7 +69,7 @@ def test_real_inference_returns_v0_contract_and_in_memory_evidence() -> None:
 
     assert set(result) == {"image_width", "image_height", "model_name", "model_version", "detections"}
     assert (result["image_width"], result["image_height"]) == (886, 595)
-    assert result["model_version"] == "v0-mvp"
+    assert result["model_version"] == "v1"
     assert result["detections"]
     for detection in result["detections"]:
         assert set(detection) == DETECTION_KEYS
@@ -89,6 +105,18 @@ def test_real_inference_on_blank_image_has_zero_detections() -> None:
     assert annotated.startswith(b"\xff\xd8")
 
 
+def test_prediction_source_applies_exif_orientation() -> None:
+    image = Image.new("RGB", (800, 600))
+    exif = Image.Exif()
+    exif[274] = 6  # Stored landscape pixels displayed 90 degrees clockwise.
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG", exif=exif)
+    source = inference._load_image(buffer.getvalue())
+    assert source.size == (600, 800)
+    assert source.getexif().get(274, 1) == 1
+
+
+@pytest.mark.skipif(not SMOKE_IMAGE.is_file(), reason="Original multi.png reference fixture is not present")
 def test_http_to_celery_worker_to_database_with_real_model(
     session_factory: sessionmaker[Session],
     migrated_engine,
@@ -100,6 +128,7 @@ def test_http_to_celery_worker_to_database_with_real_model(
     from app.api.v1.router import api_router
     from app.models import InferenceJob
     from app.services.inference_jobs import DatabaseInfraScanService
+    from app.services.system_metrics import summarize_system_metrics
     from inference.celery import database
     from inference.celery import tasks  # noqa: F401  registers the production task
     from inference.celery.celery_app import celery_app
@@ -107,10 +136,12 @@ def test_http_to_celery_worker_to_database_with_real_model(
     monkeypatch.setenv("DATABASE_URL", migrated_engine.url.render_as_string(hide_password=False))
     database.dispose_engine()
     celery_app.conf.update(broker_url="memory://", result_backend="cache+memory://")
+    media_storage = InMemoryMediaStorage()
+    monkeypatch.setattr(tasks, "R2MediaStorageAdapter", lambda: media_storage)
 
     app = FastAPI()
     app.state.infrascan_service = DatabaseInfraScanService(
-        session_factory, CeleryInferenceQueue(celery_app)
+        session_factory, CeleryInferenceQueue(celery_app), media_storage
     )
     app.include_router(api_router, prefix="/api/v1")
     image = _jpeg(Image.open(SMOKE_IMAGE))
@@ -118,7 +149,7 @@ def test_http_to_celery_worker_to_database_with_real_model(
 
     try:
         with start_worker(celery_app, pool="solo", perform_ping_check=False, shutdown_timeout=30):
-            with TestClient(app) as client:
+            with TestClient(app, headers=citizen_a()) as client:
                 response = client.post(
                     "/api/v1/inference/jobs",
                     files=[
@@ -141,23 +172,45 @@ def test_http_to_celery_worker_to_database_with_real_model(
         database.dispose_engine()
 
     assert job["status"] == "completed"
-    assert job["model_version"] == "v0-mvp"
+    assert job["model_version"] == "v1"
     assert detections["total"] == len(detections["items"]) > 0
     evidence_ids = {d["evidence_media"] for d in detections["items"]}
     assert len(evidence_ids) == 1 and None not in evidence_ids
+    assert any(d["location"] is not None for d in detections["items"])
     for item in detections["items"]:
         assert item["classification"] == CLASS_LABELS[item["issue_type"]]
         assert len(item["bounding_box"]) == 4
+        if item["location"] is not None:
+            assert item["latitude"] == item["location"]["latitude"]
+            assert item["longitude"] == item["location"]["longitude"]
 
     # Compare persisted rows with a direct call on the same stored bytes.
     expected, _ = inference.inference_with_annotation(inference.DEFAULT_WEIGHT_PATH, image)
     with session_factory() as session:
         stored = session.get(InferenceJob, job_id)
-        assert stored.input_media.data == image
+        metrics = summarize_system_metrics(session)
+        assert metrics["submitted_jobs"] == 1
+        assert metrics["completed_jobs"] == 1
+        assert metrics["success_rate"] == 1
+        assert metrics["mean_queue_wait_seconds"] is not None
+        assert metrics["mean_processing_seconds"] is not None
+        assert metrics["mean_end_to_end_seconds"] is not None
+        assert metrics["mean_end_to_end_seconds"] >= metrics["mean_processing_seconds"]
+        assert metrics["detections"] == detections["total"]
+        assert metrics["located_detections"] > 0
+        print(f"SYSTEM_METRICS {metrics}")
+        assert stored.input_media.data is None
+        assert media_storage.objects[stored.input_media.object_storage_key] == image
         rows = sorted(stored.detection_records, key=lambda r: r.confidence, reverse=True)
-        assert [r.bounding_box for r in rows] == [d["bbox_xyxy"] for d in expected["detections"]]
-        assert [r.confidence for r in rows] == [d["confidence"] for d in expected["detections"]]
+        for row, detection in zip(rows, expected["detections"], strict=True):
+            assert row.bounding_box == pytest.approx(detection["bbox_xyxy"], abs=0.5)
+            assert row.confidence == pytest.approx(detection["confidence"], abs=1e-3)
         assert [r.severity for r in rows] == [d["severity"] for d in expected["detections"]]
-        with Image.open(BytesIO(stored.evidence_media[0].data)) as evidence:
+        evidence_row = stored.evidence_media[0]
+        assert evidence_row.data is None
+        assert evidence_row.object_storage_key == f"evidence/{job_id}/{evidence_row.media_id}.jpg"
+        with Image.open(
+            BytesIO(media_storage.objects[evidence_row.object_storage_key])
+        ) as evidence:
             assert evidence.format == "JPEG"
             assert evidence.size == Image.open(BytesIO(image)).size

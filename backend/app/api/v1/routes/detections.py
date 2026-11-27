@@ -2,13 +2,23 @@ from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
+from fastapi.responses import JSONResponse
 
+from app.api.auth import require_privileged_user
 from app.api.dependencies import get_service
 from app.schemas import DetectionDTO, DetectionEvidenceDTO, Page
-from app.services.contracts import InfraScanService
+from app.api.errors import error_response
+from app.services.contracts import DetectionNotFoundError, InfraScanService
 
-router = APIRouter(prefix="/detections", tags=["detections"])
+# Global detection reads span every user's jobs and are not owner-scoped, so
+# only developers and municipal administrators may use them. Others read their
+# detections through /jobs/{job_id}/detections.
+router = APIRouter(
+    prefix="/detections",
+    tags=["detections"],
+    dependencies=[Depends(require_privileged_user)],
+)
 
 
 @router.get("", response_model=Page[DetectionDTO])
@@ -47,8 +57,13 @@ async def list_detections(
 async def get_detection(
     detection_id: UUID,
     service: Annotated[InfraScanService, Depends(get_service)],
-) -> DetectionDTO:
-    return await service.get_detection(detection_id)
+) -> DetectionDTO | JSONResponse:
+    try:
+        return await service.get_detection(detection_id)
+    except DetectionNotFoundError:
+        return error_response(
+            status.HTTP_404_NOT_FOUND, "DETECTION_NOT_FOUND", "Detection not found."
+        )
 
 
 @router.get("/{detection_id}/evidence", response_model=DetectionEvidenceDTO)

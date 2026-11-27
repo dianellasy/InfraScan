@@ -1,0 +1,259 @@
+{
+ "split": "test",
+ "imgsz": 640,
+ "ultralytics": {
+  "overall": {
+   "precision": 0.639128633059511,
+   "recall": 0.5816687355620389,
+   "mAP50": 0.6254013217978442,
+   "mAP50_95": 0.3243289154381828
+  },
+  "per_class": {
+   "Longitudinal crack": {
+    "precision": 0.6463960434661852,
+    "recall": 0.6766478223872948,
+    "AP50": 0.6976610144284113,
+    "AP50_95": 0.4170279408514827
+   },
+   "Transverse crack": {
+    "precision": 0.5981086673721568,
+    "recall": 0.6645367412140575,
+    "AP50": 0.6720369767568256,
+    "AP50_95": 0.3545847863035453
+   },
+   "Alligator crack": {
+    "precision": 0.657464564715504,
+    "recall": 0.5972222222222222,
+    "AP50": 0.6503607487392357,
+    "AP50_95": 0.3242638560347627
+   },
+   "Pothole": {
+    "precision": 0.654545256684198,
+    "recall": 0.388268156424581,
+    "AP50": 0.48154654726690466,
+    "AP50_95": 0.20143907856294044
+   }
+  },
+  "save_dir": "D:\\InfraScan-pothole\\analysis\\runs\\detect\\val_test"
+ },
+ "per_country": {
+  "India": {
+   "images": 755,
+   "precision": 0.3917311523934697,
+   "recall": 0.4574388640467275,
+   "mAP50": 0.41467200166025675,
+   "mAP50_95": 0.18980230258629316,
+   "per_class_AP50": {
+    "Longitudinal crack": 0.42045046978526246,
+    "Transverse crack": 0.091,
+    "Alligator crack": 0.6544972099755684,
+    "Pothole": 0.4927403268801963
+   }
+  },
+  "United_States": {
+   "images": 480,
+   "precision": 0.5854160226567413,
+   "recall": 0.5906264771654287,
+   "mAP50": 0.5829297054543916,
+   "mAP50_95": 0.3385815727694995,
+   "per_class_AP50": {
+    "Longitudinal crack": 0.7562063981388069,
+    "Transverse crack": 0.6823775136255686,
+    "Alligator crack": 0.6463974900917632,
+    "Pothole": 0.24673741996142806
+   }
+  }
+ },
+ "own_iou50": {
+  "0.15": {
+   "Longitudinal crack": {
+    "precision": 0.4761,
+    "recall": 0.7615,
+    "f1": 0.5859,
+    "mean_iou_tp": 0.8001,
+    "tp": 648,
+    "fp": 713,
+    "gt": 851
+   },
+   "Transverse crack": {
+    "precision": 0.4521,
+    "recall": 0.7987,
+    "f1": 0.5774,
+    "mean_iou_tp": 0.7672,
+    "tp": 250,
+    "fp": 303,
+    "gt": 313
+   },
+   "Alligator crack": {
+    "precision": 0.4761,
+    "recall": 0.691,
+    "f1": 0.5637,
+    "mean_iou_tp": 0.7452,
+    "tp": 199,
+    "fp": 219,
+    "gt": 288
+   },
+   "Pothole": {
+    "precision": 0.459,
+    "recall": 0.5,
+    "f1": 0.4786,
+    "mean_iou_tp": 0.7142,
+    "tp": 179,
+    "fp": 211,
+    "gt": 358
+   }
+  },
+  "0.25": {
+   "Longitudinal crack": {
+    "precision": 0.6119,
+    "recall": 0.691,
+    "f1": 0.649,
+    "mean_iou_tp": 0.8071,
+    "tp": 588,
+    "fp": 373,
+    "gt": 851
+   },
+   "Transverse crack": {
+    "precision": 0.5759,
+    "recall": 0.7029,
+    "f1": 0.6331,
+    "mean_iou_tp": 0.7751,
+    "tp": 220,
+    "fp": 162,
+    "gt": 313
+   },
+   "Alligator crack": {
+    "precision": 0.6281,
+    "recall": 0.6215,
+    "f1": 0.6248,
+    "mean_iou_tp": 0.7505,
+    "tp": 179,
+    "fp": 106,
+    "gt": 288
+   },
+   "Pothole": {
+    "precision": 0.6266,
+    "recall": 0.4078,
+    "f1": 0.4941,
+    "mean_iou_tp": 0.7282,
+    "tp": 146,
+    "fp": 87,
+    "gt": 358
+   }
+  },
+  "0.35": {
+   "Longitudinal crack": {
+    "precision": 0.6929,
+    "recall": 0.5993,
+    "f1": 0.6427,
+    "mean_iou_tp": 0.8117,
+    "tp": 510,
+    "fp": 226,
+    "gt": 851
+   },
+   "Transverse crack": {
+    "precision": 0.6963,
+    "recall": 0.6006,
+    "f1": 0.6449,
+    "mean_iou_tp": 0.7783,
+    "tp": 188,
+    "fp": 82,
+    "gt": 313
+   },
+   "Alligator crack": {
+    "precision": 0.7418,
+    "recall": 0.5486,
+    "f1": 0.6307,
+    "mean_iou_tp": 0.7587,
+    "tp": 158,
+    "fp": 55,
+    "gt": 288
+   },
+   "Pothole": {
+    "precision": 0.7516,
+    "recall": 0.3296,
+    "f1": 0.4583,
+    "mean_iou_tp": 0.7368,
+    "tp": 118,
+    "fp": 39,
+    "gt": 358
+   }
+  },
+  "0.5": {
+   "Longitudinal crack": {
+    "precision": 0.8067,
+    "recall": 0.4512,
+    "f1": 0.5787,
+    "mean_iou_tp": 0.8263,
+    "tp": 384,
+    "fp": 92,
+    "gt": 851
+   },
+   "Transverse crack": {
+    "precision": 0.8054,
+    "recall": 0.3834,
+    "f1": 0.5195,
+    "mean_iou_tp": 0.7864,
+    "tp": 120,
+    "fp": 29,
+    "gt": 313
+   },
+   "Alligator crack": {
+    "precision": 0.854,
+    "recall": 0.4062,
+    "f1": 0.5506,
+    "mean_iou_tp": 0.7698,
+    "tp": 117,
+    "fp": 20,
+    "gt": 288
+   },
+   "Pothole": {
+    "precision": 0.8375,
+    "recall": 0.1872,
+    "f1": 0.3059,
+    "mean_iou_tp": 0.775,
+    "tp": 67,
+    "fp": 13,
+    "gt": 358
+   }
+  },
+  "0.65": {
+   "Longitudinal crack": {
+    "precision": 0.8801,
+    "recall": 0.2761,
+    "f1": 0.4204,
+    "mean_iou_tp": 0.8448,
+    "tp": 235,
+    "fp": 32,
+    "gt": 851
+   },
+   "Transverse crack": {
+    "precision": 0.9149,
+    "recall": 0.1374,
+    "f1": 0.2389,
+    "mean_iou_tp": 0.8242,
+    "tp": 43,
+    "fp": 4,
+    "gt": 313
+   },
+   "Alligator crack": {
+    "precision": 0.9324,
+    "recall": 0.2396,
+    "f1": 0.3812,
+    "mean_iou_tp": 0.7931,
+    "tp": 69,
+    "fp": 5,
+    "gt": 288
+   },
+   "Pothole": {
+    "precision": 0.9333,
+    "recall": 0.0782,
+    "f1": 0.1443,
+    "mean_iou_tp": 0.8007,
+    "tp": 28,
+    "fp": 2,
+    "gt": 358
+   }
+  }
+ }
+}

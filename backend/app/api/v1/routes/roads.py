@@ -3,11 +3,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
+from app.api.auth import PrivilegedUser, require_user
 from app.api.dependencies import get_service
 from app.schemas import DetectionDTO, Page, RoadDTO
 from app.services.contracts import InfraScanService
 
-router = APIRouter(prefix="/roads", tags=["roads"])
+router = APIRouter(prefix="/roads", tags=["roads"], dependencies=[Depends(require_user)])
 
 
 @router.get("", response_model=Page[RoadDTO])
@@ -38,9 +39,15 @@ async def get_road(
     return await service.get_road(road_id)
 
 
-@router.get("/{road_id}/issues", response_model=Page[DetectionDTO])
+# Detections from every user's jobs; not owner-scoped.
+@router.get(
+    "/{road_id}/issues",
+    response_model=Page[DetectionDTO],
+    description="Developer and municipal administrator only.",
+)
 async def list_road_issues(
     road_id: UUID,
+    _user: PrivilegedUser,
     service: Annotated[InfraScanService, Depends(get_service)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 50,

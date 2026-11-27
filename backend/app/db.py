@@ -40,7 +40,23 @@ def resolve_database_url(raw_url: str | None = None) -> str:
 
 
 def create_db_engine(raw_url: str | None = None) -> Engine:
-    """Create a pooled engine. Does not connect until first use."""
+    """Create a pooled engine. Does not connect until first use.
+
+    On Vercel (VERCEL=1) many short-lived function instances share the
+    database, which is reached through a transaction-mode pooler such as
+    Supabase's (port 6543). Each instance then keeps a small pool, and
+    psycopg's automatic prepared statements are off because a transaction
+    pooler cannot route them back to the same server connection.
+    """
+    if os.environ.get("VERCEL"):
+        return create_engine(
+            resolve_database_url(raw_url),
+            pool_pre_ping=True,
+            pool_size=2,
+            max_overflow=3,
+            pool_recycle=300,
+            connect_args={"prepare_threshold": None},
+        )
     return create_engine(resolve_database_url(raw_url), pool_pre_ping=True)
 
 

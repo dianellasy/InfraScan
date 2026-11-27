@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 .venv/
 
 # ML work (Atul)
@@ -9,3 +11,12 @@ ml/**/__pycache__/
 *.cache
 runs/
 ml/kaggle/*/run.py
+
+# Local environments and installs
+node_modules/
+**/node_modules/
+**/.venv/
+__pycache__/
+.vercel/
+ml/kaggle/_build/
+ml/.pytest_cache/

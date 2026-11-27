@@ -3,7 +3,7 @@
 Worker tests use `tests/fixtures/v0_mvp_multi_png_output.json`, the exact
 output of the shipped v0-mvp weights on `inference/data/uploads/multi.png`,
 with a mocked runner. The real model path is covered in
-`test_real_model_pipeline.py` when ultralytics is installed.
+`test_real_model_pipeline.py` when onnxruntime is installed.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 import json
 import logging
+import math
 from io import BytesIO
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -36,10 +37,12 @@ from app.models import (
     InferenceJob,
     InferenceJobStatus,
     InputMedia,
+    Issue,
 )
 from app.repositories import DetectionRecordRepository, InferenceJobRepository
 from app.services.inference_jobs import DatabaseInfraScanService, detection_to_dto
 from app.services.inference_processing import InferenceJobProcessor
+from auth_support import CITIZEN_A, citizen_a, developer
 from inference.celery.celery_app import PROCESS_INFERENCE_JOB_TASK
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "v0_mvp_multi_png_output.json"
@@ -108,6 +111,29 @@ class RecordingQueue:
             raise self._error
 
 
+class InMemoryMediaStorage:
+    def __init__(self, put_error: Exception | None = None) -> None:
+        self._put_error = put_error
+        self.objects: dict[str, tuple[bytes, str]] = {}
+        self.puts: list[str] = []
+        self.deletes: list[str] = []
+        self.ran_on_event_loop: list[bool] = []
+
+    def put(self, data: bytes, object_key: str, content_type: str) -> None:
+        self.ran_on_event_loop.append(_on_event_loop())
+        self.puts.append(object_key)
+        if self._put_error is not None:
+            raise self._put_error
+        self.objects[object_key] = (data, content_type)
+
+    def get(self, key: str) -> bytes:
+        return self.objects[key][0]
+
+    def delete(self, key: str) -> None:
+        self.deletes.append(key)
+        self.objects.pop(key, None)
+
+
 class FakeCeleryApp:
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple, dict]] = []
@@ -116,12 +142,25 @@ class FakeCeleryApp:
         self.calls.append((name, args, kwargs))
 
 
-def build_client(service: DatabaseInfraScanService) -> TestClient:
+def build_client(
+    service: DatabaseInfraScanService, headers: dict[str, str] | None = None
+) -> TestClient:
+    """A client signed in as citizen A unless other `headers` are given."""
     app = FastAPI()
     app.state.infrascan_service = service
     register_exception_handlers(app)
     app.include_router(api_router, prefix="/api/v1")
-    return TestClient(app)
+    return TestClient(app, headers=citizen_a() if headers is None else headers)
+
+
+def build_service(
+    session_factory: sessionmaker[Session],
+    queue: RecordingQueue,
+    media_storage: InMemoryMediaStorage | None = None,
+) -> DatabaseInfraScanService:
+    return DatabaseInfraScanService(
+        session_factory, queue, media_storage or InMemoryMediaStorage()
+    )
 
 
 def submit(client: TestClient, image: bytes | None = None, filename: str = "road.jpg"):
@@ -167,8 +206,11 @@ def test_celery_queue_publishes_only_the_job_id_string() -> None:
 def test_database_unavailable_at_submission_does_not_enqueue(tmp_path: Path) -> None:
     engine = create_db_engine(f"postgresql://postgres@/missing?host={tmp_path}")
     queue = RecordingQueue(create_session_factory(engine))
+    media_storage = InMemoryMediaStorage()
     try:
-        with build_client(DatabaseInfraScanService(create_session_factory(engine), queue)) as client:
+        with build_client(
+            build_service(create_session_factory(engine), queue, media_storage)
+        ) as client:
             response = submit(client)
     finally:
         engine.dispose()
@@ -176,18 +218,37 @@ def test_database_unavailable_at_submission_does_not_enqueue(tmp_path: Path) -> 
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "SUBMISSION_DEPENDENCY_UNAVAILABLE"
     assert queue.job_ids == []
+    assert media_storage.objects == {}
+    assert media_storage.deletes == media_storage.puts
 
 
 # --- Submission ---
+
+
+def test_object_storage_failure_does_not_insert_or_enqueue(
+    session_factory: sessionmaker[Session],
+) -> None:
+    queue = RecordingQueue(session_factory)
+    media_storage = InMemoryMediaStorage(ConnectionError("R2 unavailable"))
+
+    with build_client(build_service(session_factory, queue, media_storage)) as client:
+        response = submit(client)
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "SUBMISSION_DEPENDENCY_UNAVAILABLE"
+    assert queue.job_ids == []
+    assert count_rows(session_factory, InputMedia) == 0
+    assert count_rows(session_factory, InferenceJob) == 0
 
 
 def test_submission_commits_media_and_job_before_enqueue(
     session_factory: sessionmaker[Session],
 ) -> None:
     queue = RecordingQueue(session_factory)
+    media_storage = InMemoryMediaStorage()
     image = make_jpeg()
 
-    with build_client(DatabaseInfraScanService(session_factory, queue)) as client:
+    with build_client(build_service(session_factory, queue, media_storage)) as client:
         response = submit(client, image)
 
     assert response.status_code == 202
@@ -199,10 +260,12 @@ def test_submission_commits_media_and_job_before_enqueue(
     assert queue.job_ids == [job_id]
     assert queue.committed_at_publish == [True]
     assert queue.ran_on_event_loop == [False]
+    assert media_storage.ran_on_event_loop == [False]
 
     with session_factory() as session:
         job = session.get(InferenceJob, job_id)
         assert job.status == "pending"
+        assert job.user_id == CITIZEN_A
         assert job.captured_at == datetime(2026, 11, 10, 22, 30, tzinfo=UTC)
         assert job.latitude == Decimal("33.8823")
         assert job.longitude == Decimal("-117.8851")
@@ -211,9 +274,13 @@ def test_submission_commits_media_and_job_before_enqueue(
         assert body["submitted_at"].endswith("Z")
         assert datetime.fromisoformat(body["submitted_at"]) == job.created_at
         # Content type comes from validation, not the client's declared image/png.
-        assert job.input_media.data == image
+        assert job.input_media.data is None
         assert job.input_media.content_type == "image/jpeg"
         assert job.input_media.filename == "road.jpg"
+        expected_key = f"input/{job.input_media.media_id}.jpg"
+        assert job.input_media.object_storage_key == expected_key
+        assert media_storage.puts == [expected_key]
+        assert media_storage.objects[expected_key] == (image, "image/jpeg")
 
 
 @pytest.mark.parametrize(
@@ -230,14 +297,17 @@ def test_job_insert_failure_rolls_back_media_and_does_not_enqueue(
     status_code: int,
     code: str,
 ) -> None:
-    def fail(self, media, metadata):
-        assert media.media_id is not None  # media row was already flushed
+    def fail(self, media, metadata, user_id):
+        assert user_id == CITIZEN_A
+        assert media.media_id is not None
+        assert media.object_storage_key == f"input/{media.media_id}.jpg"
         raise error
 
     monkeypatch.setattr(InferenceJobRepository, "create_pending", fail)
     queue = RecordingQueue(session_factory)
+    media_storage = InMemoryMediaStorage()
 
-    with build_client(DatabaseInfraScanService(session_factory, queue)) as client:
+    with build_client(build_service(session_factory, queue, media_storage)) as client:
         response = submit(client)
 
     assert response.status_code == status_code
@@ -245,14 +315,17 @@ def test_job_insert_failure_rolls_back_media_and_does_not_enqueue(
     assert queue.job_ids == []
     assert count_rows(session_factory, InputMedia) == 0
     assert count_rows(session_factory, InferenceJob) == 0
+    assert media_storage.objects == {}
+    assert media_storage.deletes == media_storage.puts
 
 
 def test_queue_publication_error_returns_dependency_error_and_fails_job(
     session_factory: sessionmaker[Session],
 ) -> None:
     queue = RecordingQueue(session_factory, error=ConnectionRefusedError("broker down"))
+    media_storage = InMemoryMediaStorage()
 
-    with build_client(DatabaseInfraScanService(session_factory, queue)) as client:
+    with build_client(build_service(session_factory, queue, media_storage)) as client:
         response = submit(client)
 
     assert response.status_code == 503
@@ -262,6 +335,7 @@ def test_queue_publication_error_returns_dependency_error_and_fails_job(
         job = session.get(InferenceJob, queue.job_ids[0])
         assert job.status == "failed"
         assert job.input_media is not None
+        assert job.input_media.object_storage_key in media_storage.objects
 
 
 # --- Worker processing ---
@@ -279,7 +353,10 @@ def test_worker_persists_detections_with_shared_evidence_and_exact_values(
         return copy.deepcopy(v0_output), ANNOTATED_JPEG
 
     clock = StepClock()
-    status = InferenceJobProcessor(session_factory, runner, clock=clock).process(job_id)
+    media_storage = InMemoryMediaStorage()
+    status = InferenceJobProcessor(
+        session_factory, runner, clock=clock, media_storage=media_storage
+    ).process(job_id)
 
     assert status == InferenceJobStatus.COMPLETED
     assert seen_inputs == [(image, "road.jpg")]
@@ -295,8 +372,12 @@ def test_worker_persists_detections_with_shared_evidence_and_exact_values(
 
         assert len(job.evidence_media) == 1
         evidence = job.evidence_media[0]
-        assert evidence.data == ANNOTATED_JPEG
+        assert evidence.data is None
         assert evidence.content_type == "image/jpeg"
+        expected_key = f"evidence/{job_id}/{evidence.media_id}.jpg"
+        assert evidence.object_storage_key == expected_key
+        assert media_storage.puts == [expected_key]
+        assert media_storage.objects[expected_key] == (ANNOTATED_JPEG, "image/jpeg")
 
         records = sorted(job.detection_records, key=lambda r: r.confidence, reverse=True)
         expected = v0_output["detections"]
@@ -308,10 +389,30 @@ def test_worker_persists_detections_with_shared_evidence_and_exact_values(
             # Exact equality: fractional pixel coordinates must round-trip.
             assert record.bounding_box == detection["bbox_xyxy"]
             assert record.evidence_media == evidence.media_id
-            assert record.issue_id is None
-            assert record.location is None
+            # The sample camera's downward pitch puts every fixture box below
+            # its geometric horizon and within the configured 100 m range.
+            assert record.location is not None
+            assert record.location["latitude"] > float(job.latitude)
             assert record.frame_timestamp is None
+            # Inference time and capture time are kept separately.
             assert record.detected_at == detected_at
+            assert record.observed_at == job.captured_at
+
+        # Five boxes in one image are five Issues, even where projections are
+        # closer together than the match radius.
+        assert len({record.issue_id for record in records}) == 5
+        for record in records:
+            issue = session.get(Issue, record.issue_id)
+            assert issue.issue_type_code == "pothole"
+            assert issue.status == "pending_review"
+            assert (issue.latitude, issue.longitude) == (
+                record.location["latitude"], record.location["longitude"],
+            )
+            assert issue.location_accuracy_m is None
+            assert issue.severity == record.severity
+            assert issue.first_seen_at == issue.last_seen_at == job.captured_at
+            expected_reason = None if record.confidence >= 0.5 else "low_confidence"
+            assert issue.review_reason == expected_reason
 
 
 def test_worker_runs_inference_after_committing_running_state(
@@ -334,7 +435,9 @@ def test_worker_runs_inference_after_committing_running_state(
             )
         return v0_output, ANNOTATED_JPEG
 
-    InferenceJobProcessor(session_factory, runner).process(job_id)
+    InferenceJobProcessor(
+        session_factory, runner, media_storage=InMemoryMediaStorage()
+    ).process(job_id)
 
     assert observed["status"] == "running"
     assert observed["started_at"] is not None
@@ -348,7 +451,9 @@ def test_zero_detection_inference_completes_with_no_records(
     empty_output = {**v0_output, "detections": []}
 
     status = InferenceJobProcessor(
-        session_factory, lambda image, name: (empty_output, ANNOTATED_JPEG)
+        session_factory,
+        lambda image, name: (empty_output, ANNOTATED_JPEG),
+        media_storage=InMemoryMediaStorage(),
     ).process(job_id)
 
     assert status == InferenceJobStatus.COMPLETED
@@ -359,6 +464,7 @@ def test_zero_detection_inference_completes_with_no_records(
         assert job.completed_at is not None
         assert job.detection_records == []
         assert len(job.evidence_media) == 1
+    assert count_rows(session_factory, Issue) == 0
 
 
 def test_inference_failure_marks_job_failed_and_logs_job_id(
@@ -370,7 +476,9 @@ def test_inference_failure_marks_job_failed_and_logs_job_id(
         raise RuntimeError("model crashed")
 
     with caplog.at_level(logging.ERROR):
-        status = InferenceJobProcessor(session_factory, runner).process(job_id)
+        status = InferenceJobProcessor(
+            session_factory, runner, media_storage=InMemoryMediaStorage()
+        ).process(job_id)
 
     assert status == InferenceJobStatus.FAILED
     assert any(str(job_id) in r.getMessage() and r.exc_info for r in caplog.records)
@@ -391,7 +499,11 @@ def test_malformed_model_output_marks_job_failed(
     bad = copy.deepcopy(v0_output)
     bad["detections"][2]["bbox_xyxy"] = [1.0, 2.0, 3.0]
 
-    status = InferenceJobProcessor(session_factory, lambda i, n: (bad, ANNOTATED_JPEG)).process(job_id)
+    status = InferenceJobProcessor(
+        session_factory,
+        lambda i, n: (bad, ANNOTATED_JPEG),
+        media_storage=InMemoryMediaStorage(),
+    ).process(job_id)
 
     assert status == InferenceJobStatus.FAILED
     assert count_rows(session_factory, DetectionRecord) == 0
@@ -409,17 +521,91 @@ def test_result_persistence_failure_rolls_back_all_outputs(
 
     monkeypatch.setattr(DetectionRecordRepository, "add_many", fail)
 
+    media_storage = InMemoryMediaStorage()
     status = InferenceJobProcessor(
-        session_factory, lambda i, n: (v0_output, ANNOTATED_JPEG)
+        session_factory,
+        lambda i, n: (v0_output, ANNOTATED_JPEG),
+        media_storage=media_storage,
     ).process(job_id)
 
     assert status == InferenceJobStatus.FAILED
-    # The evidence row was flushed in the same transaction and must be gone.
+    # The evidence row and uploaded object must both be cleaned up.
     assert count_rows(session_factory, EvidenceMedia) == 0
+    assert count_rows(session_factory, Issue) == 0
+    assert media_storage.objects == {}
+    assert media_storage.deletes == media_storage.puts
     with session_factory() as session:
         job = session.get(InferenceJob, job_id)
         assert job.status == "failed"
         assert job.model_version is None
+
+
+def test_evidence_upload_failure_does_not_persist_outputs(
+    session_factory: sessionmaker[Session], v0_output: dict
+) -> None:
+    job_id = create_pending_job(session_factory)
+    media_storage = InMemoryMediaStorage(ConnectionError("R2 unavailable"))
+
+    status = InferenceJobProcessor(
+        session_factory,
+        lambda i, n: (v0_output, ANNOTATED_JPEG),
+        media_storage=media_storage,
+    ).process(job_id)
+
+    assert status == InferenceJobStatus.FAILED
+    assert count_rows(session_factory, EvidenceMedia) == 0
+    assert count_rows(session_factory, DetectionRecord) == 0
+    assert media_storage.objects == {}
+    assert media_storage.deletes == media_storage.puts
+    with session_factory() as session:
+        job = session.get(InferenceJob, job_id)
+        assert job.status == "failed"
+        assert job.model_version is None
+
+
+@pytest.mark.parametrize("width", [None, 0, -10, True, 886.0])
+def test_missing_or_invalid_prediction_dimensions_fail_without_outputs(
+    session_factory: sessionmaker[Session], v0_output: dict, width,
+) -> None:
+    job_id = create_pending_job(session_factory)
+    result = {**v0_output, "image_width": width}
+    status = InferenceJobProcessor(
+        session_factory,
+        lambda i, n: (result, ANNOTATED_JPEG),
+        media_storage=InMemoryMediaStorage(),
+    ).process(job_id)
+    assert status == InferenceJobStatus.FAILED
+    assert count_rows(session_factory, DetectionRecord) == 0
+    assert count_rows(session_factory, EvidenceMedia) == 0
+
+
+def test_worker_uses_injected_camera_and_heading(
+    session_factory: sessionmaker[Session], v0_output: dict,
+) -> None:
+    from inference.geolocation import CameraProfile
+
+    profile = CameraProfile("test", 1000, 800, 500, 500, 500, 400, 2)
+    result = {**v0_output, "image_width": 1000, "image_height": 800,
+              "detections": [{**v0_output["detections"][0], "bbox_xyxy": [700, 500, 800, 600]}]}
+    job_id = create_pending_job(session_factory)
+    status = InferenceJobProcessor(
+        session_factory, lambda i, n: (result, ANNOTATED_JPEG),
+        media_storage=InMemoryMediaStorage(),
+        camera_profile=profile, heading_deg=90,
+    ).process(job_id)
+    assert status == InferenceJobStatus.COMPLETED
+    with session_factory() as session:
+        job = session.get(InferenceJob, job_id)
+        location = job.detection_records[0].location
+        # Facing east: 5m forward goes east; 2.5m right goes south.
+        # Independently approximate the <6m move in the local tangent plane.
+        latitude, longitude = float(job.latitude), float(job.longitude)
+        expected_latitude = latitude - math.degrees(2.5 / 6_371_008.8)
+        expected_longitude = longitude + math.degrees(
+            5 / (6_371_008.8 * math.cos(math.radians(latitude)))
+        )
+        assert location["latitude"] == pytest.approx(expected_latitude, abs=1e-8)
+        assert location["longitude"] == pytest.approx(expected_longitude, abs=1e-8)
 
 
 def test_worker_skips_unknown_and_non_pending_jobs(
@@ -431,14 +617,26 @@ def test_worker_skips_unknown_and_non_pending_jobs(
         calls.append(name)
         return v0_output, ANNOTATED_JPEG
 
-    processor = InferenceJobProcessor(session_factory, runner)
+    processor = InferenceJobProcessor(
+        session_factory, runner, media_storage=InMemoryMediaStorage()
+    )
     assert processor.process(uuid4()) is None
 
     job_id = create_pending_job(session_factory)
     assert processor.process(job_id) == InferenceJobStatus.COMPLETED
+    with session_factory() as session:
+        before = session.execute(
+            sa.select(Issue.issue_id, Issue.updated_at, Issue.last_seen_at).order_by(Issue.issue_id)
+        ).all()
+    # Duplicate delivery of a completed job adds nothing and touches no Issue.
     assert processor.process(job_id) is None
     assert len(calls) == 1
     assert count_rows(session_factory, DetectionRecord) == 5
+    with session_factory() as session:
+        after = session.execute(
+            sa.select(Issue.issue_id, Issue.updated_at, Issue.last_seen_at).order_by(Issue.issue_id)
+        ).all()
+    assert len(before) == 5 and after == before
 
 
 # --- Tracking endpoints ---
@@ -448,7 +646,8 @@ def test_end_to_end_submit_process_and_track(
     session_factory: sessionmaker[Session], v0_output: dict
 ) -> None:
     queue = RecordingQueue(session_factory)
-    service = DatabaseInfraScanService(session_factory, queue)
+    media_storage = InMemoryMediaStorage()
+    service = build_service(session_factory, queue, media_storage)
 
     with build_client(service) as client:
         accepted = submit(client).json()
@@ -460,7 +659,9 @@ def test_end_to_end_submit_process_and_track(
         assert client.get(f"/api/v1/jobs/{job_id}/detections").json()["items"] == []
 
         InferenceJobProcessor(
-            session_factory, lambda i, n: (v0_output, ANNOTATED_JPEG)
+            session_factory,
+            lambda i, n: (v0_output, ANNOTATED_JPEG),
+            media_storage=media_storage,
         ).process(queue.job_ids[0])
 
         job = client.get(f"/api/v1/jobs/{job_id}").json()
@@ -481,10 +682,34 @@ def test_end_to_end_submit_process_and_track(
         page_three = client.get(
             f"/api/v1/jobs/{job_id}/detections", params={"page": 3, "page_size": 2}
         ).json()
+        all_detections = client.get(f"/api/v1/jobs/{job_id}/detections").json()["items"]
+        top_issue_id = page_one["items"][0]["issue_id"]
+        issue = client.get(f"/api/v1/issues/{top_issue_id}").json()
+        issue_detections = client.get(f"/api/v1/issues/{top_issue_id}/detections").json()
+        job_issues = client.get("/api/v1/issues", params={"job_id": str(job_id)}).json()
+        lat = VALID_METADATA["latitude"]
+        lon = VALID_METADATA["longitude"]
+        viewport = {
+            "min_latitude": lat - 0.01, "max_latitude": lat + 0.01,
+            "min_longitude": lon - 0.01, "max_longitude": lon + 0.01,
+        }
+        issue_map = client.get("/api/v1/issues/map", params=viewport).json()
+        elsewhere = client.get(
+            "/api/v1/issues/map",
+            params={**viewport, "min_latitude": lat + 0.02, "max_latitude": lat + 0.03},
+        ).json()
+        review_queue = client.get("/api/v1/issues/review-queue").json()
+        evidence = client.get(issue["evidence_thumbnail_url"])
 
     assert (page_one["total"], page_one["page"], page_one["page_size"]) == (5, 1, 2)
     assert len(page_one["items"]) == 2
     assert len(page_three["items"]) == 1
+
+    located = page_one["items"][1]
+    assert located["location"]["latitude"] > VALID_METADATA["latitude"]
+    assert located["location"]["longitude"] > VALID_METADATA["longitude"]
+    assert located["latitude"] == located["location"]["latitude"]
+    assert located["longitude"] == located["location"]["longitude"]
 
     first = page_one["items"][0]
     top = v0_output["detections"][0]
@@ -495,14 +720,47 @@ def test_end_to_end_submit_process_and_track(
     assert first["confidence"] == top["confidence"]
     assert first["bounding_box"] == top["bbox_xyxy"]
     assert first["evidence_media"] is not None
-    assert first["issue_id"] is None
-    assert first["location"] is None
-    assert first["latitude"] is None and first["longitude"] is None
+    assert first["location"] is not None
+    assert first["latitude"] == first["location"]["latitude"]
+    assert first["longitude"] == first["location"]["longitude"]
     assert first["frame_timestamp"] is None
     assert first["road_id"] is None
     # TIMESTAMPTZ is read back in the server's zone; the API normalizes to UTC.
     assert first["detected_at"].endswith("Z")
     assert job["completed_at"].endswith("Z")
+    assert first["observed_at"] == "2026-11-10T22:30:00Z"
+
+    # Every detection is linked; the job's Issues are listed through the Issue API.
+    linked = {item["issue_id"] for item in all_detections}
+    assert None not in linked and len(linked) == 5
+    assert {item["issue_id"] for item in job_issues["items"]} == linked
+    assert job_issues["total"] == 5
+
+    # The top detection's Issue sits exactly at its projected point.
+    assert first["issue_id"] == top_issue_id
+    assert issue["issue_type_code"] == "pothole"
+    assert issue["status"] == "pending_review" and issue["needs_review"] is True
+    assert issue["review_reason"] is None
+    assert issue["severity"] == top["severity"]
+    assert (issue["latitude"], issue["longitude"]) == (first["latitude"], first["longitude"])
+    assert issue["location_accuracy_m"] is None
+    assert issue["first_seen_at"] == issue["last_seen_at"] == "2026-11-10T22:30:00Z"
+    assert issue["detection_count"] == 1
+    assert issue_detections["total"] == 1
+    assert issue_detections["items"][0]["detection_id"] == first["detection_id"]
+    assert issue_detections["items"][0]["evidence_media"] == first["evidence_media"]
+    assert issue["evidence_thumbnail_url"] == f"/api/v1/evidence/{first['evidence_media']}"
+    assert evidence.status_code == 200 and evidence.content == ANNOTATED_JPEG
+
+    # Located Issues are map markers ([longitude, latitude]) in the right viewport only.
+    features = {feature["id"]: feature for feature in issue_map["features"]}
+    assert set(features) == linked
+    assert features[top_issue_id]["geometry"]["coordinates"] == [
+        first["longitude"], first["latitude"],
+    ]
+    assert elsewhere["features"] == []
+    # Machine-created Issues stay in the review queue until someone reviews them.
+    assert linked <= {item["issue_id"] for item in review_queue["items"]}
 
 
 def test_successful_zero_detection_job_lists_empty_page(
@@ -510,10 +768,14 @@ def test_successful_zero_detection_job_lists_empty_page(
 ) -> None:
     job_id = create_pending_job(session_factory)
     InferenceJobProcessor(
-        session_factory, lambda i, n: ({**v0_output, "detections": []}, ANNOTATED_JPEG)
+        session_factory,
+        lambda i, n: ({**v0_output, "detections": []}, ANNOTATED_JPEG),
+        media_storage=InMemoryMediaStorage(),
     ).process(job_id)
 
-    with build_client(DatabaseInfraScanService(session_factory, RecordingQueue(session_factory))) as client:
+    with build_client(
+        build_service(session_factory, RecordingQueue(session_factory)), developer()
+    ) as client:
         response = client.get(f"/api/v1/jobs/{job_id}/detections")
         job = client.get(f"/api/v1/jobs/{job_id}").json()
 
@@ -524,7 +786,9 @@ def test_successful_zero_detection_job_lists_empty_page(
 
 @pytest.mark.parametrize("suffix", ["", "/detections"])
 def test_unknown_job_returns_404(session_factory: sessionmaker[Session], suffix: str) -> None:
-    with build_client(DatabaseInfraScanService(session_factory, RecordingQueue(session_factory))) as client:
+    with build_client(
+        build_service(session_factory, RecordingQueue(session_factory))
+    ) as client:
         response = client.get(f"/api/v1/jobs/{uuid4()}{suffix}")
 
     assert response.status_code == 404
@@ -570,7 +834,7 @@ def test_app_without_database_url_keeps_contract_503(monkeypatch: pytest.MonkeyP
     monkeypatch.delenv("DATABASE_URL", raising=False)
     import main
 
-    with TestClient(main.app) as client:
+    with TestClient(main.app, headers=citizen_a()) as client:
         response = submit(client)
 
     assert response.status_code == 503
@@ -581,9 +845,10 @@ def test_app_with_database_url_wires_database_service(monkeypatch: pytest.Monkey
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:secret@localhost:1/infrascan")
     import main
 
-    with TestClient(main.app) as client:
+    monkeypatch.setattr(main, "R2MediaStorageAdapter", InMemoryMediaStorage)
+    with TestClient(main.app, headers=citizen_a()) as client:
         assert isinstance(main.app.state.infrascan_service, DatabaseInfraScanService)
-        not_implemented = client.get("/api/v1/issues")
+        not_implemented = client.get("/api/v1/roads")
 
     assert not_implemented.status_code == 501
     assert not_implemented.json()["error"]["code"] == "NOT_IMPLEMENTED"

@@ -11,6 +11,7 @@ from PIL import Image
 from app.api.v1.router import api_router
 from app.schemas import InferenceJobAccepted
 from app.services.contracts import SubmissionDependencyUnavailableError
+from auth_support import CITIZEN_A, auth_headers, citizen_a
 
 
 JOB_ID = UUID("7b101a70-ec2b-4c8a-a728-272fff4fd7b8")
@@ -39,7 +40,7 @@ class FakeSubmissionService:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
 
-    async def submit_inference(self, file, metadata) -> InferenceJobAccepted:
+    async def submit_inference(self, file, metadata, user_id) -> InferenceJobAccepted:
         start_position = file.file.tell()
         content = await file.read()
         self.calls.append(
@@ -48,6 +49,7 @@ class FakeSubmissionService:
                 "content": content,
                 "filename": file.filename,
                 "metadata": metadata,
+                "user_id": user_id,
             }
         )
         return InferenceJobAccepted(
@@ -58,12 +60,12 @@ class FakeSubmissionService:
 
 
 class UnavailableSubmissionService(FakeSubmissionService):
-    async def submit_inference(self, file, metadata) -> InferenceJobAccepted:
+    async def submit_inference(self, file, metadata, user_id) -> InferenceJobAccepted:
         raise SubmissionDependencyUnavailableError
 
 
 class BrokenSubmissionService(FakeSubmissionService):
-    async def submit_inference(self, file, metadata) -> InferenceJobAccepted:
+    async def submit_inference(self, file, metadata, user_id) -> InferenceJobAccepted:
         raise RuntimeError("sensitive internal detail")
 
 
@@ -82,7 +84,7 @@ def app(service: FakeSubmissionService) -> FastAPI:
 
 @pytest.fixture
 def client(app: FastAPI):
-    with TestClient(app) as test_client:
+    with TestClient(app, headers=citizen_a()) as test_client:
         yield test_client
 
 
@@ -165,6 +167,7 @@ def test_valid_submission_calls_service_once_with_rewound_original_file(
     assert call["start_position"] == 0
     assert call["content"] == image
     assert call["filename"] == "road.jpg"
+    assert call["user_id"] == CITIZEN_A
     assert call["metadata"].captured_at == datetime(
         2026, 11, 10, 22, 30, tzinfo=UTC
     )
@@ -337,9 +340,23 @@ def test_rejects_missing_metadata(
 def test_rejects_non_multipart_request(
     client: TestClient, service: FakeSubmissionService
 ) -> None:
-    response = client.post("/api/v1/inference/jobs", json=VALID_METADATA)
+    response = client.post(
+        "/api/v1/inference/jobs",
+        content=json.dumps(VALID_METADATA),
+        headers={"content-type": "text/plain"},
+    )
 
     assert_error(response, 415, "UNSUPPORTED_REQUEST_MEDIA_TYPE", None)
+    assert service.calls == []
+
+
+def test_json_body_must_reference_a_direct_upload(
+    client: TestClient, service: FakeSubmissionService
+) -> None:
+    # JSON is the second step of a direct upload, not inline metadata.
+    response = client.post("/api/v1/inference/jobs", json=VALID_METADATA)
+
+    assert_error(response, 422, "INVALID_REQUEST", "upload_id")
     assert service.calls == []
 
 
@@ -463,11 +480,40 @@ def test_accepts_coordinate_endpoints_and_numbers(
     assert received.captured_at == datetime(2000, 1, 1, 0, 2, 3, tzinfo=UTC)
 
 
+def test_service_receives_the_verified_user_not_client_input(
+    client: TestClient, service: FakeSubmissionService
+) -> None:
+    owner = UUID("5e1f0000-0000-4000-8000-000000000001")
+    response = client.post(
+        "/api/v1/inference/jobs",
+        params={"user_id": str(CITIZEN_A)},
+        headers=auth_headers(owner, user_metadata={"user_id": str(CITIZEN_A)}),
+        files=[
+            ("file", ("road.jpg", make_jpeg(), "image/jpeg")),
+            ("metadata", (None, json.dumps(VALID_METADATA))),
+        ],
+    )
+
+    assert response.status_code == 202
+    assert [call["user_id"] for call in service.calls] == [owner]
+
+
+def test_unauthenticated_submission_never_reaches_the_service(
+    app: FastAPI, service: FakeSubmissionService
+) -> None:
+    with TestClient(app) as anonymous:
+        response = submit(anonymous, make_jpeg())
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+    assert service.calls == []
+
+
 def test_missing_service_returns_contract_503() -> None:
     test_app = FastAPI()
     test_app.include_router(api_router, prefix="/api/v1")
 
-    with TestClient(test_app) as test_client:
+    with TestClient(test_app, headers=citizen_a()) as test_client:
         response = submit(test_client, make_jpeg())
 
     assert_error(response, 503, "SERVICE_UNAVAILABLE", None)
@@ -491,7 +537,7 @@ def test_service_failures_use_safe_error_envelope(
     test_app.state.infrascan_service = service
     test_app.include_router(api_router, prefix="/api/v1")
 
-    with TestClient(test_app) as test_client:
+    with TestClient(test_app, headers=citizen_a()) as test_client:
         response = submit(test_client, make_jpeg())
 
     assert_error(response, status_code, code, None)

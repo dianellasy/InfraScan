@@ -1,14 +1,17 @@
 from datetime import datetime
-from typing import Protocol
+from typing import BinaryIO, Protocol
 from uuid import UUID
 
 from fastapi import UploadFile
 
+from app.authorization import JobAccess
 from app.schemas import (
     AnalyticsOverviewDTO,
+    BoundingBox,
     DamageDistributionDTO,
     DetectionDTO,
     DetectionEvidenceDTO,
+    DirectUploadTicket,
     GeographicAggregateDTO,
     InferenceJobAccepted,
     InferenceJobDTO,
@@ -16,46 +19,146 @@ from app.schemas import (
     InferenceSubmissionMetadata,
     IssueCreate,
     IssueDTO,
+    IssueFeatureCollection,
+    IssueFilters,
     IssueUpdate,
     Page,
     RoadConditionDTO,
     RoadDTO,
 )
+from app.services.issues import EvidenceImage, EvidenceUnavailableError  # noqa: F401
 
 
 class SubmissionDependencyUnavailableError(Exception):
     """A required storage, persistence, or queue dependency is unavailable."""
 
 
+class UploadNotFoundError(LookupError):
+    """No uploaded object exists for this caller's upload ID."""
+
+
+class UploadAlreadySubmittedError(Exception):
+    """A job already uses this upload ID."""
+
+
+class UploadTooLargeError(ValueError):
+    """The uploaded object is larger than the contract allows."""
+
+    def __init__(self, size_bytes: int) -> None:
+        super().__init__(size_bytes)
+        self.size_bytes = size_bytes
+
+
+class DetectionNotFoundError(LookupError):
+    """No detection exists for the requested detection ID."""
+
+
 class JobNotFoundError(LookupError):
-    """No inference job exists for the requested application job ID."""
+    """No inference job the caller may access exists for the requested job ID."""
+
+
+class IssueNotFoundError(LookupError):
+    """No Issue exists for the requested issue ID."""
+
+
+class EvidenceNotFoundError(LookupError):
+    """No evidence image the caller may access exists for the requested media ID."""
 
 
 class InfraScanService(Protocol):
+    """Application service behind the HTTP API.
+
+    Methods taking a `JobAccess` must hide jobs, detections, and evidence it does
+    not cover exactly as if they did not exist (callers answer 404), never with
+    a distinct "forbidden" outcome.
+    """
+
     async def submit_inference(
-        self, file: UploadFile, metadata: InferenceSubmissionMetadata
+        self, file: UploadFile, metadata: InferenceSubmissionMetadata, user_id: UUID
     ) -> InferenceJobAccepted:
         """Accept one image without waiting for inference.
 
         Implementations must store the media, create and commit the application
-        job with its metadata and media reference, then enqueue work using that
-        job ID. The job must be committed before a worker can consume it.
-        Dispatch failures must be handled explicitly by the implementation.
+        job with its metadata, media reference, and owner `user_id` (the
+        verified Supabase user UUID, never client input), then enqueue work
+        using that job ID. The job must be committed before a worker can
+        consume it. Dispatch failures must be handled explicitly by the
+        implementation.
+        """
+        ...
+
+    async def create_direct_upload(
+        self, content_type: str, size_bytes: int, user_id: UUID
+    ) -> DirectUploadTicket:
+        """Sign a short-lived URL for the browser to upload one file to storage."""
+        ...
+
+    async def fetch_direct_upload(
+        self, upload_id: UUID, content_type: str, user_id: UUID, max_bytes: int
+    ) -> tuple[BinaryIO, int]:
+        """Local copy (and size) of the caller's uploaded object, for validation.
+
+        Raises UploadNotFoundError, UploadAlreadySubmittedError, or
+        UploadTooLargeError (after deleting the object).
+        """
+        ...
+
+    async def discard_direct_upload(
+        self, upload_id: UUID, content_type: str, user_id: UUID
+    ) -> None:
+        """Delete an uploaded object that failed validation."""
+        ...
+
+    async def submit_direct_upload(
+        self,
+        upload_id: UUID,
+        content_type: str,
+        filename: str | None,
+        metadata: InferenceSubmissionMetadata,
+        user_id: UUID,
+    ) -> InferenceJobAccepted:
+        """Commit and publish a job for an already uploaded, validated object."""
+        ...
+
+    async def list_issue_map(
+        self, bbox: BoundingBox, filters: IssueFilters, limit: int, access: JobAccess
+    ) -> IssueFeatureCollection:
+        """Located Issues in `bbox` as GeoJSON, one Feature per Issue.
+
+        Returns at most `limit` features (most severe, then most recently seen,
+        first) and reports in `meta` whether more Issues matched.
         """
         ...
 
     async def list_issues(
-        self, page: int, page_size: int, status: str | None
+        self,
+        filters: IssueFilters,
+        bbox: BoundingBox | None,
+        page: int,
+        page_size: int,
+        access: JobAccess,
     ) -> Page[IssueDTO]: ...
 
-    async def get_issue(self, issue_id: UUID) -> IssueDTO: ...
+    async def get_issue(self, issue_id: UUID, access: JobAccess) -> IssueDTO: ...
+
+    async def list_issue_detections(
+        self, issue_id: UUID, page: int, page_size: int, access: JobAccess
+    ) -> Page[DetectionDTO]: ...
+
+    async def get_evidence_image(
+        self, media_id: UUID, access: JobAccess
+    ) -> EvidenceImage: ...
 
     async def create_issue(self, issue: IssueCreate) -> IssueDTO: ...
 
-    async def update_issue(self, issue_id: UUID, update: IssueUpdate) -> IssueDTO: ...
+    async def update_issue(
+        self, issue_id: UUID, update: IssueUpdate, reviewer_id: UUID, access: JobAccess
+    ) -> IssueDTO:
+        """Record a reviewer's decision; raises IssueNotFoundError."""
+        ...
 
     async def list_review_queue(
-        self, page: int, page_size: int
+        self, page: int, page_size: int, access: JobAccess
     ) -> Page[IssueDTO]: ...
 
     async def list_jobs(
@@ -65,12 +168,13 @@ class InfraScanService(Protocol):
         status: str | None,
         submitted_after: datetime | None,
         submitted_before: datetime | None,
+        access: JobAccess,
     ) -> Page[InferenceJobDTO]: ...
 
-    async def get_job(self, job_id: UUID) -> InferenceJobDTO: ...
+    async def get_job(self, job_id: UUID, access: JobAccess) -> InferenceJobDTO: ...
 
     async def list_job_detections(
-        self, job_id: UUID, page: int, page_size: int
+        self, job_id: UUID, page: int, page_size: int, access: JobAccess
     ) -> Page[DetectionDTO]: ...
 
     async def list_roads(
@@ -105,7 +209,9 @@ class InfraScanService(Protocol):
         max_longitude: float | None,
     ) -> Page[DetectionDTO]: ...
 
-    async def get_detection(self, detection_id: UUID) -> DetectionDTO: ...
+    async def get_detection(self, detection_id: UUID) -> DetectionDTO:
+        """Raises DetectionNotFoundError."""
+        ...
 
     async def get_detection_evidence(
         self, detection_id: UUID

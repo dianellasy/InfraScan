@@ -5,17 +5,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# ffmpeg/ffprobe decode dashcam MP4s. The model runs on ONNX Runtime
+# (in requirements.txt), so no torch, ultralytics or OpenCV is needed.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1 \
-    libglib2.0-0 \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-# Install CPU-only PyTorch first so ultralytics does not pull the CUDA wheel.
-RUN pip install --no-cache-dir \
-    torch torchvision \
-    --index-url https://download.pytorch.org/whl/cpu \
- && pip install --no-cache-dir ultralytics pillow -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY main.py .
 COPY ./app /app/app
