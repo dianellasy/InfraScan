@@ -7,7 +7,6 @@ import { fetchJobIssues } from "./issues/api.ts";
 import { reviewReasonLabel, severityInfo, statusLabel } from "./issues/constants.ts";
 import type { Issue } from "./issues/types.ts";
 import { focusBounds, issueHref, jobHref, mapHref } from "./routing.ts";
-import { TopBar } from "./TopBar.tsx";
 import { UTC_OFFSET_OPTIONS, browserUtcOffset, formatUtcOffset } from "./utcOffset.ts";
 import { readPhotoMetadata, toDateTimeLocal } from "./photoMetadata.ts";
 import "./App.css";
@@ -296,8 +295,9 @@ function App({ jobId }: { jobId?: string }) {
     : null;
 
   return (
-    <main className="app-shell">
-      <TopBar route="upload" />
+    // AppRoutes provides the shared sidebar, header, and footer.
+    // This component renders only the upload page content.
+    <div className="upload-page">
 
       <section className="intro">
         <p className="eyebrow">IMAGE ANALYSIS</p>
@@ -677,8 +677,7 @@ function App({ jobId }: { jobId?: string }) {
         </section>
       )}
 
-      <footer>InfraScan · Road damage detection</footer>
-    </main>
+    </div>
   );
 }
 

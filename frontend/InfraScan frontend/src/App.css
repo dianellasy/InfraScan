@@ -808,3 +808,63 @@ a.primary-button {
 .overview-page .navigation-button {
   text-decoration: none;
 }
+
+/*========== SHARED WORKSPACE LAYOUT ==========*/
+.workspace-layout {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+  background: #f4f6f9;
+}
+
+.workspace-layout .workspace-main {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+
+/* TopBar still provides account details and Sign Out.
+   Navigation is now displayed in the sidebar. */
+.workspace-layout .topbar .brand {
+  display: none;
+}
+
+.workspace-layout .topbar {
+  justify-content: flex-end;
+}
+
+/* On narrow screens, stack navigation above content. */
+@media (max-width: 800px) {
+  .workspace-layout {
+    flex-direction: column;
+  }
+}
+
+/* Upload Page Layout */
+.workspace-layout .upload-page {
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 32px;
+  box-sizing: border-box;
+}
+
+/* Prevent the upload panels from overflowing. */
+.workspace-layout .upload-page .content-grid {
+  width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  .workspace-layout .upload-page {
+    padding: 24px;
+  }
+}
+
+@media (max-width: 800px) {
+  .workspace-layout .upload-page {
+    padding: 20px 16px;
+  }
+}

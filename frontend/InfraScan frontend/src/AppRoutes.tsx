@@ -1,4 +1,5 @@
 import App from "./App.tsx";
+import { Sidebar } from "./components/Sidebar.tsx";
 import { AuthGate } from "./auth/AuthGate.tsx";
 import { IssueDetailPage } from "./issues/IssueDetailPage.tsx";
 import { IssueMapPage } from "./issues/IssueMapPage.tsx";
@@ -14,26 +15,61 @@ function SignedInRoutes() {
   const route = useHashRoute();
 
   // Keyed so a new submission, or returning to a job, starts from fresh state.
-  if (route.name === "upload") return <App key={route.jobId ?? "new"} jobId={route.jobId} />;
+  // if (route.name === "upload")
+  //   return <App key={route.jobId ?? "new"} jobId={route.jobId} />;
+
   return (
-    <main className="app-shell wide">
-      <TopBar route={route.name} />
-      {route.name === "map" && (
-        <IssueMapPage
-          key={mapHref(route.bounds, route.issueId)}
-          initialBounds={route.bounds}
-          focusIssueId={route.issueId}
+    // Shared layout for all non-upload workspace pages.
+    <div className="workspace-layout">
+      {/* Left navigation sidebar for all workspace pages. */}
+      <Sidebar route={route.name} />
+
+      {/* Main application content */}
+      <main className="app-shell wide workspace-main">
+        {/* Preserve the existing TopBar and account menu. */}
+        <TopBar
+          route={route.name}
+          showAccount={false}
+          showNavigation={false}
         />
-      )}
-      {route.name === "overview" && <Overview />}
-      {route.name === "detections" && <DetectionsPage />}
-      {route.name === "detection" && (
-        <DetectionReview key={route.detectionId} detectionId={route.detectionId} />
-      )}
-      {route.name === "review" && <ReviewQueuePage />}
-      {route.name === "issue" && <IssueDetailPage key={route.issueId} issueId={route.issueId} />}
-      <footer>InfraScan · Road damage detection</footer>
-    </main>
+
+        {/* Upload page */}
+        {route.name === "upload" && (
+          <App
+            key={route.jobId ?? "new"}
+            jobId={route.jobId}
+          />
+        )}
+
+        {/* Existing routes remain unchanged. */}
+        {route.name === "map" && (
+          <IssueMapPage
+            key={mapHref(route.bounds, route.issueId)}
+            initialBounds={route.bounds}
+            focusIssueId={route.issueId}
+          />
+        )}
+
+        {route.name === "overview" && <Overview />}
+
+        {route.name === "detections" && <DetectionsPage />}
+
+        {route.name === "detection" && (
+          <DetectionReview
+            key={route.detectionId}
+            detectionId={route.detectionId}
+          />
+        )}
+
+        {route.name === "review" && <ReviewQueuePage />}
+
+        {route.name === "issue" && (
+          <IssueDetailPage key={route.issueId} issueId={route.issueId} />
+        )}
+
+        <footer>InfraScan · Road damage detection</footer>
+      </main>
+    </div>
   );
 }
 

@@ -1,0 +1,232 @@
+/* InfraScan Sidebar */
+.workspace-sidebar {
+  width: 240px;
+  min-width: 240px;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+
+  display: flex;
+  flex-direction: column;
+
+  background: #ffffff;
+  border-right: 1px solid #e2e8f0;
+}
+
+/* Logo and project name */
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  padding: 22px 20px;
+
+  color: #1d2939;
+  font-size: 21px;
+  font-weight: 700;
+  text-decoration: none;
+
+  border-bottom: 1px solid #edf0f3;
+}
+
+.sidebar-brand img {
+  width: 36px;
+  height: 36px;
+}
+
+/* Workspace location */
+.sidebar-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  margin: 20px 16px;
+  padding: 14px;
+
+  background: #f3f5f8;
+  border-radius: 8px;
+}
+
+.sidebar-workspace strong {
+  font-size: 13px;
+}
+
+/* Small section labels */
+.sidebar-caption {
+  margin: 0;
+  color: #8a99ad;
+
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+/* Navigation container */
+.sidebar-navigation {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  padding: 8px 16px;
+}
+
+.sidebar-navigation .sidebar-caption {
+  margin: 8px 0;
+}
+
+/* Individual navigation items */
+.sidebar-link {
+  display: flex;
+  align-items: center;
+
+  min-height: 42px;
+  padding: 0 14px;
+
+  border-radius: 6px;
+
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+
+  transition: background-color 0.15s ease;
+}
+
+.sidebar-link:hover {
+  background: #f1f5f9;
+  color: #1d4f91;
+}
+
+/* Highlights selected route by user */
+.sidebar-link-active {
+  background: #eaf2ff;
+  color: #285fa9;
+  font-weight: 700;
+}
+
+.sidebar-link:focus-visible {
+  outline: 2px solid #285fa9;
+  outline-offset: 2px;
+}
+
+/* Bottom information */
+.sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  margin-top: auto;
+  padding: 20px;
+
+  border-top: 1px solid #edf0f3;
+}
+
+.sidebar-footer strong {
+  font-size: 12px;
+}
+
+.sidebar-footer span {
+  font-size: 11px;
+  color: #8a99ad;
+}
+
+/* Small screens: switch the sidebar to a
+   horizontal, scrollable navigation layout. */
+@media (max-width: 800px) {
+  .workspace-sidebar {
+    position: relative;
+    width: 100%;
+    min-width: 0;
+    height: auto;
+  }
+
+  .sidebar-workspace,
+  .sidebar-footer {
+    display: none;
+  }
+
+  .sidebar-brand {
+    padding: 14px 20px;
+  }
+
+  .sidebar-navigation {
+    flex-direction: row;
+    overflow-x: auto;
+    padding: 10px 16px;
+  }
+
+  .sidebar-navigation .sidebar-caption {
+    display: none;
+  }
+
+  .sidebar-link {
+    white-space: nowrap;
+  }
+}
+
+/* SIDEBAR ACCOUNT MENU */
+
+/* Main area grows to fill the space beside the sidebar. */
+.workspace-layout .workspace-main {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* Restrict the workspace top bar to its own horizontal space. */
+.workspace-layout .topbar {
+  min-height: 64px;
+  padding: 12px 32px;
+  border-bottom: 1px solid #e4e9f0;
+  box-sizing: border-box;
+}
+
+/* Give Overview consistent margins inside the workspace. */
+.workspace-layout .overview-page {
+  width: 100%;
+  max-width: 1600px;
+
+  margin: 0 auto;
+  padding: 32px;
+
+  box-sizing: border-box;
+}
+
+/* Ensure the existing Overview panels stay inside the content area. */
+.workspace-layout .overview-page .panel {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 20px;
+}
+
+/* Prevent oversized headings from overflowing. */
+.workspace-layout .overview-page h1 {
+  font-size: clamp(28px, 3vw, 44px);
+  line-height: 1.15;
+}
+
+/* Tablet screens */
+@media (max-width: 1100px) {
+  .workspace-layout .overview-page {
+    padding: 24px;
+  }
+
+  .workspace-layout .topbar {
+    padding: 12px 24px;
+  }
+}
+
+/* Small screens */
+@media (max-width: 800px) {
+  .workspace-layout .overview-page {
+    padding: 20px 16px;
+  }
+
+  .workspace-layout .topbar {
+    padding: 12px 16px;
+  }
+}
