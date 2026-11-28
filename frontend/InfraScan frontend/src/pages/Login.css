@@ -1,0 +1,135 @@
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: #f5f8f7;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 400px;
+  padding: 40px;
+  border: 1px solid #e0e7e4;
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 12px 35px rgb(20 40 35 / 6%);
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 32px;
+  color: var(--ink);
+  font-size: 1.75rem;
+  font-weight: 750;
+}
+
+.login-brand img {
+  width: 42px;
+  height: 42px;
+}
+
+.login-heading h1 {
+  margin: 0 0 10px;
+  font-size: 1.625rem;
+  letter-spacing: -0.025em;
+}
+
+.login-heading p {
+  margin: 0;
+  color: #718079;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.login-form {
+  margin-top: 28px;
+}
+
+.login-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.login-field label {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.login-field input {
+  width: 100%;
+  padding: 13px 14px;
+  border: 1px solid #d8e0e8;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.9375rem;
+}
+
+.login-field input::placeholder {
+  color: #718079;
+  opacity: 1;
+}
+
+.login-field input:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.login-field input:focus-visible {
+  outline: 3px solid rgb(36 93 168 / 30%);
+  outline-offset: 2px;
+  border-color: var(--accent);
+}
+
+.login-submit {
+  width: 100%;
+  min-height: 46px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: white;
+  font-size: 0.9375rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.login-submit:hover:not(:disabled) {
+  background: var(--accent-dark);
+}
+
+.login-submit:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.login-submit:focus-visible {
+  outline: 3px solid rgb(36 93 168 / 35%);
+  outline-offset: 3px;
+}
+
+.login-error {
+  margin: -4px 0 16px;
+  color: #b42318;
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 480px) {
+  .login-page {
+    align-items: flex-start;
+    padding: 16px 12px;
+  }
+
+  .login-card {
+    margin-top: max(24px, 8vh);
+    padding: 26px 22px;
+  }
+}

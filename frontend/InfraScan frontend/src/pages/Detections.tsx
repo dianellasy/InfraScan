@@ -1,7 +1,6 @@
 
-import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import infrascanLogo from "../assets/infrascan.svg";
+import { useMemo, useState } from "react";
+import { EvidenceImage } from "../issues/EvidenceImage.tsx";
 import "../App.css";
 import "./Detections.css";
 
@@ -13,8 +12,14 @@ export type Detection = {
   confidence: number;
   severity: "High" | "Medium" | "Low";
   status: "Unreviewed" | "Validated" | "Rejected";
+  /** ISO 8601 time the image or video frame was captured. */
   detectedAt: string;
+  /** API-relative annotated evidence image, when there is one. */
+  evidencePath?: string;
 };
+
+const formatTime = (iso: string) => new Date(iso).toLocaleString();
+const shortId = (id: string) => id.slice(0, 8);
 
 type DetectionsProps = {
   detections?: Detection[];
@@ -29,8 +34,6 @@ export default function Detections({
   activeTickets = 0,
   onReview,
 }: DetectionsProps) {
-  const navigate = useNavigate();
-
   const [search, setSearch] = useState("");
   const [classification, setClassification] = useState("All");
   const [severity, setSeverity] = useState("All");
@@ -71,9 +74,18 @@ export default function Detections({
     });
   }, [detections, search, classification, severity, status, source]);
 
-  useEffect(() => {
-    setPage(1);
-  }, [search, classification, severity, status, source]);
+  // Any filter change starts again from the first page.
+  const resetPageAfter =
+    <T,>(set: (value: T) => void) =>
+    (value: T) => {
+      set(value);
+      setPage(1);
+    };
+  const changeSearch = resetPageAfter(setSearch);
+  const changeClassification = resetPageAfter(setClassification);
+  const changeSeverity = resetPageAfter(setSeverity);
+  const changeStatus = resetPageAfter(setStatus);
+  const changeSource = resetPageAfter(setSource);
 
   const totalPages = Math.max(
     1,
@@ -142,59 +154,6 @@ export default function Detections({
 
   return (
     <div className="detections-page">
-      {/* InfraScan header */}
-      <header className="topbar">
-        <a
-          className="brand"
-          href="/overview"
-          aria-label="InfraScan home"
-        >
-          <img
-            className="brand-mark"
-            src={infrascanLogo}
-            alt=""
-          />
-          <span>InfraScan</span>
-        </a>
-
-        <span className="topbar-note">
-          Road infrastructure inspection
-        </span>
-      </header>
-
-      {/* Page navigation */}
-      <nav
-        className="page-navigation"
-        aria-label="Page navigation"
-      >
-        <button
-          type="button"
-          className="navigation-button"
-          onClick={() => navigate(-1)}
-        >
-          <span aria-hidden="true">←</span>
-          Back
-        </button>
-
-        <button
-          type="button"
-          className="navigation-button"
-          onClick={() => navigate("/overview")}
-        >
-          <span aria-hidden="true">→</span>
-          Overview
-        </button>
-
-        <button
-          type="button"
-          className="navigation-button"
-          onClick={() => navigate("/upload")}
-        >
-          <span aria-hidden="true">→</span>
-          Upload
-        </button>
-      </nav>
-
       {/* Page heading */}
       <div className="detections-header">
         <div>
@@ -211,7 +170,7 @@ export default function Detections({
       <div className="demo-notice">
         {hasDetections
           ? "Review detected road issues below. Validation decisions require human review."
-          : "No detection records are currently loaded. Results will appear here once analysis data is connected."}
+          : "No detections yet. They appear here after an upload has been analysed."}
       </div>
 
       {/* Summary cards */}
@@ -241,7 +200,7 @@ export default function Detections({
             <button
               type="button"
               className={status === "All" ? "active" : ""}
-              onClick={() => setStatus("All")}
+              onClick={() => changeStatus("All")}
             >
               All detections
             </button>
@@ -249,7 +208,7 @@ export default function Detections({
             <button
               type="button"
               className={status === "Unreviewed" ? "active" : ""}
-              onClick={() => setStatus("Unreviewed")}
+              onClick={() => changeStatus("Unreviewed")}
             >
               Awaiting validation
             </button>
@@ -257,7 +216,7 @@ export default function Detections({
             <button
               type="button"
               className={status === "Validated" ? "active" : ""}
-              onClick={() => setStatus("Validated")}
+              onClick={() => changeStatus("Validated")}
             >
               Validated
             </button>
@@ -265,7 +224,7 @@ export default function Detections({
             <button
               type="button"
               className={status === "Rejected" ? "active" : ""}
-              onClick={() => setStatus("Rejected")}
+              onClick={() => changeStatus("Rejected")}
             >
               Rejected
             </button>
@@ -275,17 +234,17 @@ export default function Detections({
           <div className="detection-controls">
             <input
               type="search"
-              placeholder="Search detection ID, street, or camera source"
+              placeholder="Search detection ID, location, or source"
               aria-label="Search detections"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => changeSearch(e.target.value)}
             />
 
             <div className="detection-filters">
               <select
                 aria-label="Filter by classification"
                 value={classification}
-                onChange={(e) => setClassification(e.target.value)}
+                onChange={(e) => changeClassification(e.target.value)}
               >
                 <option value="All">All classifications</option>
                 {classifications.map((item) => (
@@ -298,7 +257,7 @@ export default function Detections({
               <select
                 aria-label="Filter by severity"
                 value={severity}
-                onChange={(e) => setSeverity(e.target.value)}
+                onChange={(e) => changeSeverity(e.target.value)}
               >
                 <option value="All">All severities</option>
                 <option value="High">High</option>
@@ -309,7 +268,7 @@ export default function Detections({
               <select
                 aria-label="Filter by review status"
                 value={status}
-                onChange={(e) => setStatus(e.target.value)}
+                onChange={(e) => changeStatus(e.target.value)}
               >
                 <option value="All">All review states</option>
                 <option value="Unreviewed">Unreviewed</option>
@@ -320,7 +279,7 @@ export default function Detections({
               <select
                 aria-label="Filter by source"
                 value={source}
-                onChange={(e) => setSource(e.target.value)}
+                onChange={(e) => changeSource(e.target.value)}
               >
                 <option value="All">All sources</option>
                 {sources.map((item) => (
@@ -367,8 +326,8 @@ export default function Detections({
                     onClick={() => setSelectedId(d.id)}
                   >
                     <td>
-                      <strong>{d.id}</strong>
-                      <small>{d.detectedAt}</small>
+                      <strong title={d.id}>{shortId(d.id)}</strong>
+                      <small>{formatTime(d.detectedAt)}</small>
                     </td>
 
                     <td>{d.classification}</td>
@@ -482,12 +441,22 @@ export default function Detections({
           <aside className="detection-preview">
             <div className="preview-heading">
               <h2>Selected detection</h2>
-              <span>{selectedDetection.id}</span>
+              <span title={selectedDetection.id}>{shortId(selectedDetection.id)}</span>
             </div>
 
             <div className="preview-image">
-              <span>Evidence preview</span>
-              <p>Evidence image not connected yet</p>
+              {selectedDetection.evidencePath ? (
+                <EvidenceImage
+                  path={selectedDetection.evidencePath}
+                  alt={`${selectedDetection.classification} evidence with detection boxes`}
+                  className="preview-evidence"
+                />
+              ) : (
+                <>
+                  <span>Evidence preview</span>
+                  <p>No evidence image for this detection</p>
+                </>
+              )}
             </div>
 
             <div className="preview-details">
@@ -521,7 +490,7 @@ export default function Detections({
 
               <p>
                 <strong>Detected at</strong>
-                {selectedDetection.detectedAt}
+                {formatTime(selectedDetection.detectedAt)}
               </p>
             </div>
 
@@ -534,11 +503,6 @@ export default function Detections({
               Review detection
             </button>
 
-            {!onReview && (
-              <p className="preview-note">
-                Detection Review navigation will be connected next.
-              </p>
-            )}
           </aside>
         )}
       </div>

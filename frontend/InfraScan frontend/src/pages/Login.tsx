@@ -1,111 +1,88 @@
-import { useState, type FormEvent } from "react";
-import{ useNavigate } from "react-router-dom";
-
+import { useId, useState, type FormEvent } from "react";
 import infrascanLogo from "../assets/infrascan.svg";
-import "../App.css";
+import "./Login.css";
 
-function Login() {
-    // navigate to another page
-    const navigate = useNavigate();
+export type LoginProps = {
+  onSignIn: (email: string, password: string) => void;
+  loading?: boolean;
+  error?: string | null;
+};
 
-    // state variables to store user input
-    const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
+export function Login({ onSignIn, loading = false, error }: LoginProps) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const id = useId();
+  const headingId = `${id}-heading`;
+  const emailId = `${id}-email`;
+  const passwordId = `${id}-password`;
+  const errorId = `${id}-error`;
 
-    // stores validation msg when incomplete
-    const [error, setError] = useState("");
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSignIn(email, password);
+  }
 
-    // handles form submission when user clicks login button
-    function handleSubmit(event: FormEvent<HTMLFormElement>) {
-        // prevents browser from refreshing the page when form is submitted
-        event.preventDefault();
-        
-        // checks if email and password are not empty
-        if (email.trim() === "" || password.trim() === "") {
-            setError("Please enter both email and password.");
-            return;
-        }
+  return (
+    <main className="login-page">
+      <section className="login-card" aria-labelledby={headingId}>
+        <div className="login-brand">
+          <img src={infrascanLogo} alt="" />
+          <span>InfraScan</span>
+        </div>
 
-        // clear any previous error messages
-        setError("");
+        <div className="login-heading">
+          <h1 id={headingId}>Welcome back!</h1>
+          <p>Sign in to access your InfraScan account.</p>
+        </div>
 
+        <form
+          className="login-form"
+          onSubmit={handleSubmit}
+          aria-busy={loading}
+          aria-labelledby={headingId}
+          aria-describedby={error ? errorId : undefined}
+        >
+          <div className="login-field">
+            <label htmlFor={emailId}>Email address</label>
+            <input
+              id={emailId}
+              type="email"
+              placeholder="name@example.com"
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              disabled={loading}
+              required
+            />
+          </div>
 
-        // PROTOTYPE: In a real application, you would send the username and password to the server for authentication.
-        // navigate to the overview page after successful login
-        navigate("/overview");
-    }
+          <div className="login-field">
+            <label htmlFor={passwordId}>Password</label>
+            <input
+              id={passwordId}
+              type="password"
+              placeholder="Enter your password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              disabled={loading}
+              required
+            />
+          </div>
 
-    return (
-        <main className="login-page">
-            <section className="login-card">
+          {error && (
+            <p className="login-error" id={errorId} role="alert">
+              {error}
+            </p>
+          )}
 
-            {/* InfraScan logo */}
-            <div className="login-brand">
-                <img src={infrascanLogo} alt="" />
-                <h1>InfraScan</h1>
-            </div>
-
-            {/* Introduction */}
-            <div className="login-heading">
-                <h2>Welcome Back!</h2>
-                <p>
-                    Sign in to access your InfraScan account.
-                </p>
-            </div>
-
-            {/* Login Form */}
-            <form onSubmit={handleSubmit}>
-                <div className="login-field">
-                    <label htmlFor="email">Email address</label>
-
-                    <input
-                        id="email"
-                        type="email"
-                        placeholder="name@example.com"
-                        autoComplete="email"
-                        value={email}
-                        onChange={(event) => setEmail(event.target.value)}
-                        required
-                    />
-                </div>
-
-                <div className="login-field">
-                    <label htmlFor="password">Password</label>
-
-                    <input
-                        id="password"
-                        type="password"
-                        placeholder="Enter your password"
-                        autoComplete="current-password"
-                        value={password}
-                        onChange={(event) => setPassword(event.target.value)}
-                        required
-                    />
-                </div>
-
-                {/* Validation Message */}
-                {error && (
-                    <p className="login-error" role="alert">
-                        {error}
-                    </p>
-                )}
-
-
-                {/* Submit the form */}
-                <button className="login-submit" type="submit">
-                    <span>Sign In</span>
-                </button>
-
-                </form>
-
-                {/* Demo for prototype */}
-                <p className="login-demo-note">
-                    Prototype Demo: Use any email and password to log in.
-                </p>
-            </section>
-        </main>
-    );
+          <button className="login-submit" type="submit" disabled={loading}>
+            {loading ? "Signing in…" : "Sign in"}
+          </button>
+        </form>
+      </section>
+    </main>
+  );
 }
-
 
 export default Login;

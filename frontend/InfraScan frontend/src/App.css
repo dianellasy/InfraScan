@@ -3,6 +3,41 @@
   margin: 0 auto;
 }
 
+.app-shell.wide {
+  width: min(1480px, calc(100% - 40px));
+}
+
+.topbar-end {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+}
+
+.topbar-nav {
+  display: flex;
+  gap: 7px;
+}
+
+.topbar-nav a {
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.topbar-nav a:hover {
+  background: #edf1ef;
+  color: var(--ink);
+}
+
+.topbar-nav a[aria-current="page"] {
+  background: #e7effb;
+  color: var(--accent-dark);
+}
+
 .topbar {
   min-height: 76px;
   display: flex;
@@ -212,7 +247,20 @@
   font-size: 0.8rem;
 }
 
-.field-grid input {
+.video-note,
+.field-hint {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.field-hint {
+  margin-top: 8px;
+  font-size: 0.8rem;
+}
+
+.field-grid input,
+.field-grid select {
   width: 100%;
   min-width: 0;
   padding: 9px 10px;
@@ -332,6 +380,25 @@
 
 .results-panel {
   margin-top: 18px;
+}
+
+.job-issues-summary {
+  margin: 0 0 14px;
+  color: var(--muted);
+}
+
+.job-issue-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.job-issue-actions .primary-button {
+  width: auto;
+  margin-top: 0;
+  text-decoration: none;
 }
 
 .table-scroll {
@@ -665,4 +732,79 @@ footer {
 .logout-button:focus-visible {
   outline: 3px solid #255da7;
   outline-offset: 2px;
+}
+.secondary-button {
+  border: 1px solid #c7d2df;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #1f3b5c;
+  padding: 10px 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.secondary-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.metadata-fields .secondary-button {
+  margin-top: 12px;
+}
+
+.class-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.class-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #eef3fb;
+  color: #1f4f96;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.annotated-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.annotated-image {
+  display: block;
+  width: 100%;
+  max-height: 520px;
+  object-fit: contain;
+  border-radius: 10px;
+  background: #0f172a;
+}
+
+/*========== OVERVIEW ==========*/
+
+.overview-page {
+  display: grid;
+  gap: 20px;
+}
+
+.overview-page .panel {
+  padding-bottom: 24px;
+}
+
+a.primary-button {
+  display: inline-block;
+  width: auto;
+  margin-top: 8px;
+  text-decoration: none;
+}
+
+.overview-page .page-navigation {
+  margin: 8px 0 0;
+}
+
+.overview-page .navigation-button {
+  text-decoration: none;
 }
